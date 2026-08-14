@@ -6,24 +6,18 @@ button { border: 0; border-radius: 12px; padding: .75rem 1rem; background: var(-
 button:hover { transform: translateY(-1px); filter: brightness(1.08); }
 button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
 input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 12px; background: #0c1525; color: var(--text); padding: .8rem .9rem; outline: none; }
-label { display: grid; gap: .45rem; color: var(--muted); font-size: .82rem; }
-label input { color: var(--text); font-size: 1rem; }
 textarea { min-height: 160px; resize: vertical; font-family: "SFMono-Regular", Consolas, monospace; }
 pre { max-height: 440px; overflow: auto; border: 1px solid var(--line); border-radius: 14px; background: #070d18; padding: 1rem; white-space: pre-wrap; }
-.shell { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+.shell { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
 .sidebar { border-right: 1px solid var(--line); background: rgba(9, 17, 31, .82); backdrop-filter: blur(20px); padding: 1.25rem; position: sticky; top: 0; height: 100vh; overflow: auto; }
 .brand { display: grid; gap: .2rem; margin-bottom: 1.25rem; }
 .brand span { font-size: 1.45rem; font-weight: 800; }
-.brand small, .eyebrow, small, .empty, .section-head span { color: var(--muted); }
+.brand small, .eyebrow, small, .empty { color: var(--muted); }
 .full { width: 100%; }
 .primary { background: linear-gradient(135deg, var(--accent), #ff9f1c); color: #111827; font-weight: 800; }
 .ghost { background: transparent; border: 1px solid var(--line); }
 .danger { color: var(--danger); }
-.actions { display: flex; gap: .65rem; flex-wrap: wrap; justify-content: flex-end; }
-.request-list, .collection { display: grid; gap: .65rem; }
-.request-list { margin-top: 1rem; }
-.collection { margin-bottom: 1rem; }
-.collection p { margin: .4rem 0 0; color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.request-list { display: grid; gap: .65rem; margin-top: 1rem; }
 .request { display: grid; grid-template-columns: 64px 1fr; text-align: left; align-items: center; gap: .5rem; }
 .request b { color: var(--accent-2); font-size: .78rem; }
 .request span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -34,16 +28,15 @@ pre { max-height: 440px; overflow: auto; border: 1px solid var(--line); border-r
 .eyebrow { margin: 0; text-transform: uppercase; letter-spacing: .18em; font-size: .78rem; }
 .card { border: 1px solid var(--line); border-radius: 22px; background: rgba(17, 28, 47, .88); box-shadow: 0 24px 80px rgba(0, 0, 0, .28); padding: 1rem; }
 .composer { display: grid; gap: .8rem; }
-.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+.name { max-width: 420px; font-weight: 700; }
 .urlbar { display: grid; grid-template-columns: 150px 1fr 130px; gap: .7rem; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .section-head { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-bottom: .8rem; }
 .section-head h2, .response h2 { margin: 0; font-size: 1rem; }
 .rows { display: grid; gap: .55rem; }
-.row { display: grid; grid-template-columns: 38px 1fr 1.4fr 44px; gap: .5rem; align-items: center; }
+.row { display: grid; grid-template-columns: 38px 1fr 1.4fr; gap: .5rem; align-items: center; }
 .row input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--accent); justify-self: center; }
-.icon { display: grid; place-items: center; height: 42px; padding: 0; color: var(--danger); }
 .status { display: flex; gap: .7rem; flex-wrap: wrap; color: var(--muted); margin: .75rem 0; }
 .status b { color: var(--accent-2); }
 .error { color: var(--danger); background: rgba(251, 113, 133, .12); border: 1px solid rgba(251, 113, 133, .35); padding: .85rem; border-radius: 12px; }
-@media (max-width: 900px) { .shell, .grid, .meta-grid, .urlbar { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; } .workspace { padding: 1rem; } .hero { display: grid; } }
+@media (max-width: 900px) { .shell, .grid, .urlbar { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; } .workspace { padding: 1rem; } }
