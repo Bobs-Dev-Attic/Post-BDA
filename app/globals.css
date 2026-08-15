@@ -652,6 +652,26 @@ pre {
   /* 16px controls stop iOS from zooming when a field is focused */
   input, select, textarea { font-size: 16px; }
 
+  /* touch-friendly response controls: segmented switch gets its own full-width
+     row of evenly-sized targets; Copy / Extract grow to fill the next row */
+  .response-toolbar { flex-wrap: wrap; gap: .5rem; }
+  .view-switch { flex: 1 0 100%; }
+  .view-switch .seg {
+    flex: 1;
+    justify-content: center;
+    min-height: 40px;
+    padding: .5rem .35rem;
+    font-size: .85rem;
+  }
+  .response-toolbar .copy-btn {
+    flex: 1 1 auto;
+    margin-left: 0;
+    text-align: center;
+    min-height: 40px;
+    padding: .55rem .9rem;
+  }
+  .lang-tag { align-self: center; }
+
   .response { height: auto; max-height: none; }
   .h-resizer { display: none; }
 }
