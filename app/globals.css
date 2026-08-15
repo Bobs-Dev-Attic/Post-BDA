@@ -643,8 +643,15 @@ pre {
   }
   .drawer-toggle:hover { background: var(--hover); }
 
-  .urlbar { grid-template-columns: 100px 1fr; }
-  .send { grid-column: 1 / -1; }
+  /* thumb-friendly URL bar: bigger targets, method + URL on top, Send full-width */
+  .urlbar { grid-template-columns: 104px 1fr; gap: .6rem; }
+  .urlbar .method-select,
+  .urlbar input { min-height: 46px; }
+  .send { grid-column: 1 / -1; min-height: 48px; font-size: 1rem; }
+
+  /* 16px controls stop iOS from zooming when a field is focused */
+  input, select, textarea { font-size: 16px; }
+
   .response { height: auto; max-height: none; }
   .h-resizer { display: none; }
 }
