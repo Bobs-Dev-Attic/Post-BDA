@@ -467,6 +467,13 @@ pre {
 }
 .copy-btn:hover { color: var(--text); background: var(--hover); }
 
+/* extract-to-variable */
+.extract { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.extract-path { flex: 2 1 220px; }
+.extract-name { flex: 1 1 130px; }
+.extract-save { flex: 0 0 auto; padding: .5rem 1rem; }
+.extract-msg { flex-basis: 100%; color: var(--muted); font-size: .78rem; }
+
 .response-body { max-height: 420px; }
 
 /* JSON syntax colors */
