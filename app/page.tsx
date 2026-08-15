@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
-type KeyValue = { id: string; key: string; value: string; enabled: boolean };
+type KeyValue = { id: string; key: string; value: string; enabled: boolean; secret?: boolean };
 type RequestConfig = {
   id: string;
   name: string;
@@ -77,7 +77,7 @@ function redactSecrets(ws: WorkspaceData): WorkspaceData {
   return {
     ...ws,
     requests: ws.requests.map((r) => ({ ...r, auth: { ...r.auth, token: '', username: '', password: '', value: '' } })),
-    variables: ws.variables.map((v) => ({ ...v, value: '' })),
+    variables: ws.variables.map((v) => (v.secret ? { ...v, value: '' } : v)),
   };
 }
 
@@ -705,6 +705,7 @@ export default function Home() {
               {editorTab === 'variables' && (
                 <Rows
                   rows={variables}
+                  secretable
                   onAdd={() => setVariables((rows) => [...rows, blankRow()])}
                   onChange={(id, patch) => setVariables((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)))}
                   onRemove={(id) => setVariables((rows) => rows.filter((r) => r.id !== id))}
@@ -974,16 +975,19 @@ function Rows({
   onAdd,
   onChange,
   onRemove,
+  secretable,
 }: {
   rows: KeyValue[];
   onAdd: () => void;
   onChange: (id: string, patch: Partial<KeyValue>) => void;
   onRemove: (id: string) => void;
+  secretable?: boolean;
 }) {
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   return (
     <div className="rows">
       {rows.map((row) => (
-        <div className="row" key={row.id}>
+        <div className={secretable ? 'row secretable' : 'row'} key={row.id}>
           <input
             type="checkbox"
             checked={row.enabled}
@@ -991,7 +995,41 @@ function Rows({
             aria-label="Enabled"
           />
           <input value={row.key} onChange={(e) => onChange(row.id, { key: e.target.value })} placeholder="Key" />
-          <input value={row.value} onChange={(e) => onChange(row.id, { value: e.target.value })} placeholder="Value" />
+          {secretable ? (
+            <div className="value-wrap">
+              <input
+                type={row.secret && !revealed[row.id] ? 'password' : 'text'}
+                value={row.value}
+                onChange={(e) => onChange(row.id, { value: e.target.value })}
+                placeholder="Value"
+              />
+              {row.secret && (
+                <button
+                  className="eye"
+                  type="button"
+                  title={revealed[row.id] ? 'Hide value' : 'Show value'}
+                  aria-label={revealed[row.id] ? 'Hide value' : 'Show value'}
+                  onClick={() => setRevealed((r) => ({ ...r, [row.id]: !r[row.id] }))}
+                >
+                  {revealed[row.id] ? '🙈' : '👁'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <input value={row.value} onChange={(e) => onChange(row.id, { value: e.target.value })} placeholder="Value" />
+          )}
+          {secretable && (
+            <button
+              className={row.secret ? 'secret-toggle on' : 'secret-toggle'}
+              type="button"
+              title={row.secret ? 'Secret (value masked)' : 'Mark as secret'}
+              aria-label={row.secret ? 'Unmark secret' : 'Mark as secret'}
+              aria-pressed={!!row.secret}
+              onClick={() => onChange(row.id, { secret: !row.secret })}
+            >
+              {row.secret ? '🔒' : '🔓'}
+            </button>
+          )}
           <button className="row-del" onClick={() => onRemove(row.id)} aria-label="Remove row" type="button">
             ×
           </button>
