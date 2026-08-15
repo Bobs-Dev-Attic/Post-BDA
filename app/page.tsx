@@ -199,33 +199,37 @@ export default function Home() {
     localStorage.setItem(responseKey, String(responseHeight));
   }, [responseHeight]);
 
-  function startResize(event: React.MouseEvent) {
+  function startResize(event: React.PointerEvent) {
     event.preventDefault();
-    const onMove = (e: MouseEvent) => setSidebarWidth(Math.min(560, Math.max(210, e.clientX)));
+    const onMove = (e: PointerEvent) => setSidebarWidth(Math.min(560, Math.max(210, e.clientX)));
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   }
 
-  function startResizeResponse(event: React.MouseEvent) {
+  function startResizeResponse(event: React.PointerEvent) {
     event.preventDefault();
-    const onMove = (e: MouseEvent) =>
+    const onMove = (e: PointerEvent) =>
       setResponseHeight(Math.min(window.innerHeight * 0.85, Math.max(120, window.innerHeight - e.clientY)));
     const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
     document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
   }
@@ -975,7 +979,7 @@ export default function Home() {
         )}
       </aside>
 
-      <div className="resizer" onMouseDown={startResize} role="separator" aria-label="Resize sidebar" aria-orientation="vertical" />
+      <div className="resizer" onPointerDown={startResize} role="separator" aria-label="Resize sidebar" aria-orientation="vertical" />
 
       <section className="workspace">
         <div className="tabstrip">
@@ -1109,7 +1113,7 @@ export default function Home() {
             </div>
             </div>
 
-            <div className="h-resizer" onMouseDown={startResizeResponse} role="separator" aria-label="Resize response" aria-orientation="horizontal" />
+            <div className="h-resizer" onPointerDown={startResizeResponse} role="separator" aria-label="Resize response" aria-orientation="horizontal" />
 
             <div className="response">
               <div className="response-head">
