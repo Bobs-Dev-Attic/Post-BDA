@@ -572,6 +572,34 @@ pre {
 .response-body.json .j-bool { color: #c792ea; font-weight: 600; }
 .response-body.json .j-null { color: #fb7185; font-weight: 600; }
 
+/* clickable JSON path-picker (Extract mode) */
+.jp-tree {
+  padding: .7rem .85rem;
+  font-family: "SFMono-Regular", Consolas, ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: normal;
+}
+.jp-help {
+  margin: 0 0 .6rem;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: .74rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.jp-children { margin-left: 1.1rem; border-left: 1px solid var(--line-soft); padding-left: .5rem; }
+.jp-line { border-radius: 5px; }
+.jp-colon, .jp-brace { color: var(--muted); }
+.jp-index { color: var(--muted); }
+.jp-pick {
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 0 .2rem;
+  transition: background .1s ease;
+}
+.jp-pick:hover { background: var(--active); box-shadow: inset 0 0 0 1px var(--accent); }
+.jp-line.sel > .jp-pick { background: var(--active); box-shadow: inset 0 0 0 1px var(--accent); }
+
 /* preview iframe */
 .preview-frame {
   width: 100%;
