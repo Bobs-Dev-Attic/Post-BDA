@@ -137,8 +137,13 @@ export default function Home() {
   const [sessionOnly, setSessionOnly] = useState(false);
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
+  const [extractOpen, setExtractOpen] = useState(false);
+  const [extractPath, setExtractPath] = useState('');
+  const [extractName, setExtractName] = useState('');
+  const [extractMsg, setExtractMsg] = useState('');
   const loaded = useRef(false);
   const pendingEnvelope = useRef<Envelope | null>(null);
+  const importRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem(themeKey);
@@ -329,6 +334,83 @@ export default function Home() {
     setCollections((cols) => cols.map((c) => (c.id === id ? { ...c, name } : c)));
   }
 
+  function exportWorkspace() {
+    const payload = {
+      app: 'post-bda',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      workspace: { collections, requests, variables },
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `post-bda-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setMenu('');
+  }
+
+  function importWorkspace(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const ws = parsed.workspace ?? parsed;
+        const cols: Collection[] = ws.collections ?? [];
+        const reqs: RequestConfig[] = (ws.requests ?? []).map(normalizeRequest);
+        if (!cols.length && !reqs.length) throw new Error('empty');
+        if (!window.confirm('Import will replace your current workspace. Continue?')) return;
+        setCollections(cols);
+        setRequests(reqs);
+        setVariables(ws.variables ?? []);
+        setExpanded(Object.fromEntries(cols.map((c) => [c.id, true])));
+        const first = reqs[0]?.id ?? '';
+        setOpenTabs(first ? [first] : []);
+        setActiveId(first);
+      } catch {
+        window.alert('That file is not a valid Post-BDA workspace export.');
+      }
+    };
+    reader.readAsText(file);
+    setMenu('');
+  }
+
+  function setVariable(name: string, value: string) {
+    setVariables((rows) => {
+      if (rows.some((r) => r.key === name)) {
+        return rows.map((r) => (r.key === name ? { ...r, value } : r));
+      }
+      return [...rows, { id: uid(), key: name, value, enabled: true }];
+    });
+  }
+
+  function extractToVariable() {
+    if (!response) return;
+    const name = extractName.trim();
+    if (!name) {
+      setExtractMsg('Enter a variable name.');
+      return;
+    }
+    try {
+      const data = JSON.parse(response.body);
+      const val = extractPath.trim() ? resolvePath(data, extractPath.trim()) : data;
+      if (val === undefined) {
+        setExtractMsg(`No value at "${extractPath.trim()}".`);
+        return;
+      }
+      setVariable(name, typeof val === 'object' ? JSON.stringify(val) : String(val));
+      setExtractMsg(`Saved to {{${name}}}.`);
+      setExtractPath('');
+      setExtractName('');
+    } catch {
+      setExtractMsg('Response body is not valid JSON.');
+    }
+  }
+
   async function unlockWorkspace(passphrase: string) {
     const env = pendingEnvelope.current;
     if (!env) return;
@@ -470,12 +552,20 @@ export default function Home() {
                     <span>Session-only secrets</span>
                   </label>
                   <p className="menu-note">
-                    When on, tokens, passwords, API keys, and variable values are kept only in memory and never written to
+                    When on, tokens, passwords, API keys, and secret variables are kept only in memory and never written to
                     storage — they clear on reload.
                   </p>
+                  <div className="menu-label">Workspace</div>
+                  <button className="menu-item" onClick={exportWorkspace}>
+                    Export to file
+                  </button>
+                  <button className="menu-item" onClick={() => importRef.current?.click()}>
+                    Import from file
+                  </button>
                 </div>
               )}
             </span>
+            <input ref={importRef} type="file" accept="application/json,.json" hidden onChange={importWorkspace} />
             {cryptoKey ? (
               <span className="dots-wrap">
                 <button
@@ -771,14 +861,46 @@ export default function Home() {
                     ))}
                   </div>
                   {response.isJson && respView === 'pretty' && <span className="lang-tag">JSON</span>}
+                  {response.isJson && (
+                    <button
+                      className="copy-btn"
+                      onClick={() => {
+                        setExtractOpen((o) => !o);
+                        setExtractMsg('');
+                      }}
+                    >
+                      Extract → var
+                    </button>
+                  )}
                   <button
-                    className="copy-btn"
+                    className={response.isJson ? 'copy-btn' : 'copy-btn push'}
                     onClick={() =>
                       navigator.clipboard?.writeText(respView === 'raw' ? response.body : response.pretty)
                     }
                   >
                     Copy
                   </button>
+                </div>
+              )}
+
+              {response && extractOpen && (
+                <div className="extract">
+                  <input
+                    className="extract-path"
+                    value={extractPath}
+                    onChange={(e) => setExtractPath(e.target.value)}
+                    placeholder="Path e.g. data.token or items[0].id (blank = whole body)"
+                  />
+                  <input
+                    className="extract-name"
+                    value={extractName}
+                    onChange={(e) => setExtractName(e.target.value)}
+                    placeholder="Variable name"
+                  />
+                  <button className="send extract-save" type="button" onClick={extractToVariable}>
+                    Save
+                  </button>
+                  {extractMsg && <span className="extract-msg">{extractMsg}</span>}
                 </div>
               )}
 
@@ -1087,6 +1209,17 @@ function applyAuth(headers: Record<string, string>, auth: Auth, variables: Recor
     headers[v(auth.key)] = v(auth.value);
   }
   // apikey + query is applied to the URL, not headers
+}
+
+// Resolve a dot/bracket path like "data.items[0].id" against a parsed JSON value.
+function resolvePath(obj: unknown, path: string): unknown {
+  const parts = path.replace(/\[(\w+)\]/g, '.$1').split('.').filter(Boolean);
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
 }
 
 function buildUrl(rawUrl: string, params: KeyValue[]) {
