@@ -254,6 +254,20 @@ pre {
   font-weight: 700;
 }
 
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+
+/* auth form */
+.auth { display: grid; gap: .7rem; max-width: 560px; }
+.auth-field { display: grid; grid-template-columns: 100px 1fr; align-items: center; gap: .8rem; }
+.auth-field > span { color: var(--muted); font-size: .85rem; font-weight: 600; }
+.auth-hint { color: var(--muted); margin: .2rem 0 0; font-size: .85rem; }
+
 /* rows */
 .editor-body { min-height: 60px; }
 .rows { display: grid; gap: .45rem; }

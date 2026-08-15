@@ -11,8 +11,19 @@ type RequestConfig = {
   params: KeyValue[];
   headers: KeyValue[];
   body: string;
+  auth: Auth;
   createdAt: string;
   updatedAt: string;
+};
+type AuthType = 'none' | 'bearer' | 'basic' | 'apikey';
+type Auth = {
+  type: AuthType;
+  token: string;
+  username: string;
+  password: string;
+  key: string;
+  value: string;
+  addTo: 'header' | 'query';
 };
 type Collection = { id: string; name: string; requestIds: string[] };
 type ResponseState = {
@@ -26,7 +37,7 @@ type ResponseState = {
   isJson: boolean;
   contentType: string;
 };
-type EditorTab = 'params' | 'headers' | 'body' | 'variables';
+type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables';
 type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'];
@@ -34,6 +45,11 @@ const storageKey = 'post-bda-workspace-v2';
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const blankRow = (): KeyValue => ({ id: uid(), key: '', value: '', enabled: true });
+const defaultAuth = (): Auth => ({ type: 'none', token: '', username: '', password: '', key: '', value: '', addTo: 'header' });
+
+function normalizeRequest(request: RequestConfig): RequestConfig {
+  return { ...request, auth: { ...defaultAuth(), ...request.auth } };
+}
 
 function makeRequest(patch: Partial<RequestConfig> = {}): RequestConfig {
   return {
@@ -44,6 +60,7 @@ function makeRequest(patch: Partial<RequestConfig> = {}): RequestConfig {
     params: [blankRow()],
     headers: [{ id: uid(), key: 'Accept', value: 'application/json', enabled: true }],
     body: '',
+    auth: defaultAuth(),
     createdAt: now(),
     updatedAt: now(),
     ...patch,
@@ -89,7 +106,7 @@ export default function Home() {
       try {
         const parsed = JSON.parse(saved);
         const cols: Collection[] = parsed.collections ?? [];
-        const reqs: RequestConfig[] = parsed.requests ?? [];
+        const reqs: RequestConfig[] = (parsed.requests ?? []).map(normalizeRequest);
         setCollections(cols);
         setRequests(reqs);
         setVariables(parsed.variables ?? []);
@@ -123,16 +140,19 @@ export default function Home() {
     () => Object.fromEntries(variables.filter((v) => v.enabled && v.key).map((v) => [v.key, v.value])),
     [variables],
   );
-  const hydratedUrl = useMemo(
-    () =>
-      active
-        ? buildUrl(
-            applyVariables(active.url, variableMap),
-            active.params.map((p) => ({ ...p, value: applyVariables(p.value, variableMap) })),
-          )
-        : '',
-    [active, variableMap],
-  );
+  const hydratedUrl = useMemo(() => {
+    if (!active) return '';
+    const params = active.params.map((p) => ({ ...p, value: applyVariables(p.value, variableMap) }));
+    if (active.auth.type === 'apikey' && active.auth.addTo === 'query' && active.auth.key) {
+      params.push({
+        id: 'auth',
+        key: applyVariables(active.auth.key, variableMap),
+        value: applyVariables(active.auth.value, variableMap),
+        enabled: true,
+      });
+    }
+    return buildUrl(applyVariables(active.url, variableMap), params);
+  }, [active, variableMap]);
 
   function requestById(id: string) {
     return requests.find((r) => r.id === id);
@@ -144,6 +164,10 @@ export default function Home() {
 
   function updateActive(patch: Partial<RequestConfig>) {
     if (active) updateRequest(active.id, patch);
+  }
+
+  function updateAuth(patch: Partial<Auth>) {
+    if (active) updateActive({ auth: { ...active.auth, ...patch } });
   }
 
   function updateRow(kind: 'params' | 'headers', rowId: string, patch: Partial<KeyValue>) {
@@ -232,6 +256,7 @@ export default function Home() {
       const headers = Object.fromEntries(
         active.headers.filter((h) => h.enabled && h.key).map((h) => [h.key, applyVariables(h.value, variableMap)]),
       );
+      applyAuth(headers, active.auth, variableMap);
       const init: RequestInit = { method: active.method, headers };
       if (!['GET', 'HEAD'].includes(active.method) && active.body.trim()) init.body = applyVariables(active.body, variableMap);
       const result = await fetch(hydratedUrl, init);
@@ -442,14 +467,23 @@ export default function Home() {
             </form>
 
             <div className="editor-tabs">
-              {(['params', 'headers', 'body', 'variables'] as EditorTab[]).map((tab) => (
+              {(['params', 'auth', 'headers', 'body', 'variables'] as EditorTab[]).map((tab) => (
                 <button
                   key={tab}
                   className={editorTab === tab ? 'etab active' : 'etab'}
                   onClick={() => setEditorTab(tab)}
                 >
-                  {tab === 'params' ? 'Params' : tab === 'headers' ? 'Headers' : tab === 'body' ? 'Body' : 'Variables'}
+                  {tab === 'params'
+                    ? 'Params'
+                    : tab === 'auth'
+                      ? 'Authorization'
+                      : tab === 'headers'
+                        ? 'Headers'
+                        : tab === 'body'
+                          ? 'Body'
+                          : 'Variables'}
                   {tab === 'params' && countRows(active.params) > 0 && <b className="count">{countRows(active.params)}</b>}
+                  {tab === 'auth' && active.auth.type !== 'none' && <b className="dot" aria-hidden />}
                   {tab === 'headers' && countRows(active.headers) > 0 && <b className="count">{countRows(active.headers)}</b>}
                 </button>
               ))}
@@ -464,6 +498,7 @@ export default function Home() {
                   onRemove={(id) => updateActive({ params: active.params.filter((r) => r.id !== id) })}
                 />
               )}
+              {editorTab === 'auth' && <AuthEditor auth={active.auth} onChange={updateAuth} />}
               {editorTab === 'headers' && (
                 <Rows
                   rows={active.headers}
@@ -599,6 +634,72 @@ function Dots({
   );
 }
 
+const authTypes: { value: AuthType; label: string }[] = [
+  { value: 'none', label: 'No Auth' },
+  { value: 'bearer', label: 'Bearer Token' },
+  { value: 'basic', label: 'Basic Auth' },
+  { value: 'apikey', label: 'API Key' },
+];
+
+function AuthEditor({ auth, onChange }: { auth: Auth; onChange: (patch: Partial<Auth>) => void }) {
+  return (
+    <div className="auth">
+      <label className="auth-field">
+        <span>Type</span>
+        <select value={auth.type} onChange={(e) => onChange({ type: e.target.value as AuthType })}>
+          {authTypes.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {auth.type === 'none' && <p className="auth-hint">This request does not use any authorization.</p>}
+
+      {auth.type === 'bearer' && (
+        <label className="auth-field">
+          <span>Token</span>
+          <input value={auth.token} onChange={(e) => onChange({ token: e.target.value })} placeholder="{{token}} or paste token" />
+        </label>
+      )}
+
+      {auth.type === 'basic' && (
+        <>
+          <label className="auth-field">
+            <span>Username</span>
+            <input value={auth.username} onChange={(e) => onChange({ username: e.target.value })} placeholder="Username" />
+          </label>
+          <label className="auth-field">
+            <span>Password</span>
+            <input value={auth.password} onChange={(e) => onChange({ password: e.target.value })} placeholder="Password" type="password" />
+          </label>
+        </>
+      )}
+
+      {auth.type === 'apikey' && (
+        <>
+          <label className="auth-field">
+            <span>Key</span>
+            <input value={auth.key} onChange={(e) => onChange({ key: e.target.value })} placeholder="X-API-Key" />
+          </label>
+          <label className="auth-field">
+            <span>Value</span>
+            <input value={auth.value} onChange={(e) => onChange({ value: e.target.value })} placeholder="{{apiKey}} or value" />
+          </label>
+          <label className="auth-field">
+            <span>Add to</span>
+            <select value={auth.addTo} onChange={(e) => onChange({ addTo: e.target.value as 'header' | 'query' })}>
+              <option value="header">Header</option>
+              <option value="query">Query Param</option>
+            </select>
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Rows({
   rows,
   onAdd,
@@ -640,6 +741,18 @@ function countRows(rows: KeyValue[]) {
 
 function applyVariables(value: string, variables: Record<string, string>) {
   return value.replace(/{{\s*([\w.-]+)\s*}}/g, (_, key) => variables[key] ?? '');
+}
+
+function applyAuth(headers: Record<string, string>, auth: Auth, variables: Record<string, string>) {
+  const v = (value: string) => applyVariables(value, variables);
+  if (auth.type === 'bearer' && auth.token) {
+    headers['Authorization'] = `Bearer ${v(auth.token)}`;
+  } else if (auth.type === 'basic' && (auth.username || auth.password)) {
+    headers['Authorization'] = `Basic ${btoa(`${v(auth.username)}:${v(auth.password)}`)}`;
+  } else if (auth.type === 'apikey' && auth.addTo === 'header' && auth.key) {
+    headers[v(auth.key)] = v(auth.value);
+  }
+  // apikey + query is applied to the URL, not headers
 }
 
 function buildUrl(rawUrl: string, params: KeyValue[]) {
