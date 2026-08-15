@@ -74,6 +74,45 @@ pre {
   border-bottom: 1px solid var(--line-soft);
 }
 .brand { font-size: 1.05rem; font-weight: 800; letter-spacing: -.01em; }
+.side-actions { display: flex; align-items: center; gap: .15rem; }
+.locked-on { color: var(--m-get); }
+
+/* lock screen + passphrase modal */
+.lock-screen { min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at top, #16233d 0, var(--bg) 45%); padding: 1.5rem; }
+.lock-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(4, 8, 16, .7);
+  backdrop-filter: blur(4px);
+}
+.lock-card {
+  width: 100%;
+  max-width: 420px;
+  display: grid;
+  gap: .8rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+}
+.lock-card h2 { margin: 0; font-size: 1.15rem; }
+.lock-hint { margin: 0; color: var(--muted); font-size: .84rem; line-height: 1.5; }
+.lock-error { margin: 0; color: var(--danger); font-size: .82rem; }
+.lock-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .3rem; }
+.lock-actions .send { padding: .55rem 1.2rem; }
+.btn-ghost {
+  padding: .55rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.btn-ghost:hover { color: var(--text); background: var(--hover); }
 .tree { overflow: auto; padding: .5rem .4rem; flex: 1; min-height: 0; }
 .tree-collection { margin-bottom: .1rem; }
 .tree-row {

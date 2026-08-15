@@ -39,6 +39,15 @@ type ResponseState = {
 };
 type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables';
 type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
+type WorkspaceData = {
+  collections: Collection[];
+  requests: RequestConfig[];
+  variables: KeyValue[];
+  openTabs: string[];
+  activeId: string;
+  expanded: Record<string, boolean>;
+};
+type Envelope = { enc: true; v: number; salt: string; iv: string; ct: string };
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'];
 const storageKey = 'post-bda-workspace-v2';
@@ -98,23 +107,38 @@ export default function Home() {
   const [respView, setRespView] = useState<ResponseView>('pretty');
   const [menu, setMenu] = useState<string>('');
   const [renaming, setRenaming] = useState<string>('');
+  const [cryptoKey, setCryptoKey] = useState<CryptoKey | null>(null);
+  const [salt, setSalt] = useState<Uint8Array | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [lockModal, setLockModal] = useState<'' | 'set' | 'change'>('');
+  const [lockError, setLockError] = useState('');
   const loaded = useRef(false);
+  const pendingEnvelope = useRef<Envelope | null>(null);
+
+  function loadWorkspace(parsed: WorkspaceData) {
+    const cols: Collection[] = parsed.collections ?? [];
+    const reqs: RequestConfig[] = (parsed.requests ?? []).map(normalizeRequest);
+    setCollections(cols);
+    setRequests(reqs);
+    setVariables(parsed.variables ?? []);
+    setExpanded(parsed.expanded ?? Object.fromEntries(cols.map((c) => [c.id, true])));
+    const tabs: string[] = (parsed.openTabs ?? []).filter((id: string) => reqs.some((r) => r.id === id));
+    const initialTabs = tabs.length ? tabs : reqs.slice(0, 1).map((r) => r.id);
+    setOpenTabs(initialTabs);
+    setActiveId(parsed.activeId && initialTabs.includes(parsed.activeId) ? parsed.activeId : initialTabs[0] ?? '');
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem(storageKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        const cols: Collection[] = parsed.collections ?? [];
-        const reqs: RequestConfig[] = (parsed.requests ?? []).map(normalizeRequest);
-        setCollections(cols);
-        setRequests(reqs);
-        setVariables(parsed.variables ?? []);
-        setExpanded(parsed.expanded ?? Object.fromEntries(cols.map((c) => [c.id, true])));
-        const tabs: string[] = (parsed.openTabs ?? []).filter((id: string) => reqs.some((r) => r.id === id));
-        const initialTabs = tabs.length ? tabs : reqs.slice(0, 1).map((r) => r.id);
-        setOpenTabs(initialTabs);
-        setActiveId(parsed.activeId && initialTabs.includes(parsed.activeId) ? parsed.activeId : initialTabs[0] ?? '');
+        if (parsed && parsed.enc) {
+          pendingEnvelope.current = parsed as Envelope;
+          setLocked(true);
+          return; // wait for passphrase; do not mark loaded
+        }
+        loadWorkspace(parsed as WorkspaceData);
         loaded.current = true;
         return;
       } catch {
@@ -132,8 +156,15 @@ export default function Home() {
 
   useEffect(() => {
     if (!loaded.current) return;
-    localStorage.setItem(storageKey, JSON.stringify({ collections, requests, variables, openTabs, activeId, expanded }));
-  }, [collections, requests, variables, openTabs, activeId, expanded]);
+    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded };
+    if (cryptoKey && salt) {
+      encryptWorkspace(cryptoKey, salt, workspace)
+        .then((env) => localStorage.setItem(storageKey, JSON.stringify(env)))
+        .catch(() => {});
+    } else {
+      localStorage.setItem(storageKey, JSON.stringify(workspace));
+    }
+  }, [collections, requests, variables, openTabs, activeId, expanded, cryptoKey, salt]);
 
   const active = requests.find((r) => r.id === activeId);
   const variableMap = useMemo(
@@ -240,6 +271,38 @@ export default function Home() {
     setCollections((cols) => cols.map((c) => (c.id === id ? { ...c, name } : c)));
   }
 
+  async function unlockWorkspace(passphrase: string) {
+    const env = pendingEnvelope.current;
+    if (!env) return;
+    try {
+      const s = fromB64(env.salt);
+      const key = await deriveKey(passphrase, s);
+      const workspace = await decryptWorkspace(key, env);
+      loadWorkspace(workspace);
+      setCryptoKey(key);
+      setSalt(s);
+      setLocked(false);
+      setLockError('');
+      loaded.current = true;
+    } catch {
+      setLockError('Incorrect passphrase. Please try again.');
+    }
+  }
+
+  async function applyPassphrase(passphrase: string) {
+    const s = crypto.getRandomValues(new Uint8Array(16));
+    const key = await deriveKey(passphrase, s);
+    setSalt(s);
+    setCryptoKey(key);
+    setLockModal('');
+  }
+
+  function removeEncryption() {
+    setCryptoKey(null);
+    setSalt(null);
+    // the persist effect will rewrite the workspace as plaintext
+  }
+
   async function sendRequest(event: FormEvent) {
     event.preventDefault();
     if (!active) return;
@@ -295,14 +358,66 @@ export default function Home() {
   const error = active ? errors[active.id] : '';
   const isSending = active ? sending[active.id] : false;
 
+  if (locked) {
+    return (
+      <main className="lock-screen">
+        <LockModal mode="unlock" error={lockError} onSubmit={unlockWorkspace} />
+      </main>
+    );
+  }
+
   return (
     <main className="shell" onClick={() => setMenu('')}>
+      {lockModal && (
+        <LockModal
+          mode={lockModal}
+          error=""
+          onSubmit={applyPassphrase}
+          onCancel={() => setLockModal('')}
+        />
+      )}
       <aside className="sidebar">
         <div className="side-head">
           <span className="brand">Post-BDA</span>
-          <button className="icon-btn" title="New collection" onClick={addCollection} aria-label="New collection">
-            +
-          </button>
+          <div className="side-actions">
+            {cryptoKey ? (
+              <span className="dots-wrap">
+                <button
+                  className="icon-btn locked-on"
+                  title="Encryption enabled"
+                  aria-label="Encryption settings"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenu(menu === 'lock' ? '' : 'lock');
+                  }}
+                >
+                  🔒
+                </button>
+                {menu === 'lock' && (
+                  <div className="menu" onClick={(e) => e.stopPropagation()}>
+                    <button className="menu-item" onClick={() => { setLockModal('change'); setMenu(''); }}>
+                      Change passphrase
+                    </button>
+                    <button className="menu-item danger" onClick={() => { removeEncryption(); setMenu(''); }}>
+                      Remove encryption
+                    </button>
+                  </div>
+                )}
+              </span>
+            ) : (
+              <button
+                className="icon-btn"
+                title="Encrypt stored secrets with a passphrase"
+                aria-label="Set passphrase"
+                onClick={() => setLockModal('set')}
+              >
+                🔓
+              </button>
+            )}
+            <button className="icon-btn" title="New collection" onClick={addCollection} aria-label="New collection">
+              +
+            </button>
+          </div>
         </div>
 
         <div className="tree">
@@ -700,6 +815,87 @@ function AuthEditor({ auth, onChange }: { auth: Auth; onChange: (patch: Partial<
   );
 }
 
+function LockModal({
+  mode,
+  error,
+  onSubmit,
+  onCancel,
+}: {
+  mode: 'unlock' | 'set' | 'change';
+  error: string;
+  onSubmit: (passphrase: string) => void;
+  onCancel?: () => void;
+}) {
+  const [pass, setPass] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [localError, setLocalError] = useState('');
+  const needsConfirm = mode !== 'unlock';
+  const title = mode === 'unlock' ? 'Unlock workspace' : mode === 'change' ? 'Change passphrase' : 'Set a passphrase';
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (needsConfirm) {
+      if (pass.length < 6) {
+        setLocalError('Use at least 6 characters.');
+        return;
+      }
+      if (pass !== confirm) {
+        setLocalError('Passphrases do not match.');
+        return;
+      }
+    } else if (!pass) {
+      setLocalError('Enter your passphrase.');
+      return;
+    }
+    onSubmit(pass);
+  }
+
+  return (
+    <div className="lock-backdrop" onClick={onCancel}>
+      <form className="lock-card" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h2>{title}</h2>
+        <p className="lock-hint">
+          {mode === 'unlock'
+            ? 'This workspace is encrypted. Enter your passphrase to unlock it.'
+            : 'Your workspace — including tokens, passwords, API keys, and variables — is encrypted at rest with AES-GCM. If you forget this passphrase, the data cannot be recovered.'}
+        </p>
+        <input
+          type="password"
+          autoFocus
+          placeholder="Passphrase"
+          value={pass}
+          onChange={(e) => {
+            setPass(e.target.value);
+            setLocalError('');
+          }}
+        />
+        {needsConfirm && (
+          <input
+            type="password"
+            placeholder="Confirm passphrase"
+            value={confirm}
+            onChange={(e) => {
+              setConfirm(e.target.value);
+              setLocalError('');
+            }}
+          />
+        )}
+        {(localError || error) && <p className="lock-error">{localError || error}</p>}
+        <div className="lock-actions">
+          {onCancel && (
+            <button type="button" className="btn-ghost" onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+          <button type="submit" className="send">
+            {mode === 'unlock' ? 'Unlock' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Rows({
   rows,
   onAdd,
@@ -792,4 +988,42 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function toB64(bytes: Uint8Array) {
+  let binary = '';
+  bytes.forEach((b) => (binary += String.fromCharCode(b)));
+  return btoa(binary);
+}
+
+function fromB64(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {
+  const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt as BufferSource, iterations: 150000, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+async function encryptWorkspace(key: CryptoKey, salt: Uint8Array, workspace: WorkspaceData): Promise<Envelope> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(JSON.stringify(workspace));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  return { enc: true, v: 1, salt: toB64(salt), iv: toB64(iv), ct: toB64(new Uint8Array(cipher)) };
+}
+
+async function decryptWorkspace(key: CryptoKey, env: Envelope): Promise<WorkspaceData> {
+  const iv = fromB64(env.iv);
+  const cipher = fromB64(env.ct);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, cipher as BufferSource);
+  return JSON.parse(new TextDecoder().decode(plain)) as WorkspaceData;
 }
