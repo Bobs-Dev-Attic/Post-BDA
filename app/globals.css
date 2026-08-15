@@ -413,8 +413,17 @@ pre {
 }
 .add-row:hover { text-decoration: underline; }
 
-/* response — capped, independently scrollable region */
-.response { flex: 0 0 auto; max-height: 50vh; overflow: auto; border-top: 1px solid var(--line); padding: 1rem 1.25rem 1.5rem; display: grid; gap: .7rem; align-content: start; }
+/* response — resizable, independently scrollable region */
+.h-resizer {
+  height: 6px;
+  flex: 0 0 auto;
+  cursor: row-resize;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  transition: background .15s ease;
+}
+.h-resizer:hover, .h-resizer:active { background: var(--accent); }
+.response { flex: 0 0 auto; height: var(--response-h, 40vh); min-height: 120px; overflow: auto; padding: 1rem 1.25rem 1.5rem; display: grid; gap: .7rem; align-content: start; }
 .response pre, .response .response-body, .response .header-table { max-height: none; }
 .response-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .response-head h2 { margin: 0; font-size: .95rem; }
@@ -514,5 +523,6 @@ pre {
   .sidebar, .resizer { display: none; }
   .urlbar { grid-template-columns: 100px 1fr; }
   .send { grid-column: 1 / -1; }
-  .response { max-height: none; }
+  .response { height: auto; max-height: none; }
+  .h-resizer { display: none; }
 }
