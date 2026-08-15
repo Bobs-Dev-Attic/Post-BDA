@@ -1035,6 +1035,12 @@ export default function Home() {
                   value={active.url}
                   onChange={(e) => updateActive({ url: e.target.value })}
                   placeholder="https://api.example.com/{{version}}/users"
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  enterKeyHint="go"
                 />
                 <button className="send" disabled={isSending || !active.url}>
                   {isSending ? 'Sending…' : 'Send'}
