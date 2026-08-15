@@ -165,6 +165,7 @@ export default function Home() {
   const [sessionOnly, setSessionOnly] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
   const [responseHeight, setResponseHeight] = useState(320);
@@ -320,6 +321,7 @@ export default function Home() {
     setOpenTabs((tabs) => (tabs.includes(id) ? tabs : [...tabs, id]));
     setActiveId(id);
     setEditorTab('params');
+    setDrawerOpen(false); // collapse the mobile drawer once a request is opened
   }
 
   function closeTab(id: string) {
@@ -686,7 +688,12 @@ export default function Home() {
   }
 
   return (
-    <main className="shell" style={{ ['--sidebar-w' as string]: `${sidebarWidth}px` }} onClick={() => setMenu('')}>
+    <main
+      className={drawerOpen ? 'shell drawer-open' : 'shell'}
+      style={{ ['--sidebar-w' as string]: `${sidebarWidth}px` }}
+      onClick={() => setMenu('')}
+    >
+      <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
       {lockModal && (
         <LockModal
           mode={lockModal}
@@ -972,6 +979,18 @@ export default function Home() {
 
       <section className="workspace">
         <div className="tabstrip">
+          <button
+            className="drawer-toggle"
+            title="Menu"
+            aria-label="Open menu"
+            aria-expanded={drawerOpen}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDrawerOpen((v) => !v);
+            }}
+          >
+            ☰
+          </button>
           {openTabs.map((id) => {
             const request = requestById(id);
             if (!request) return null;
