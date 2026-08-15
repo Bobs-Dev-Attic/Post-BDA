@@ -61,6 +61,7 @@ const themes: Theme[] = [
 ];
 const storageKey = 'post-bda-workspace-v2';
 const themeKey = 'post-bda-theme';
+const sidebarKey = 'post-bda-sidebar-w';
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const blankRow = (): KeyValue => ({ id: uid(), key: '', value: '', enabled: true });
@@ -135,13 +136,35 @@ export default function Home() {
   const [lockError, setLockError] = useState('');
   const [sessionOnly, setSessionOnly] = useState(false);
   const [theme, setTheme] = useState('midnight');
+  const [sidebarWidth, setSidebarWidth] = useState(288);
   const loaded = useRef(false);
   const pendingEnvelope = useRef<Envelope | null>(null);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem(themeKey);
     if (savedTheme) setTheme(savedTheme);
+    const savedWidth = Number(localStorage.getItem(sidebarKey));
+    if (savedWidth) setSidebarWidth(Math.min(560, Math.max(210, savedWidth)));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(sidebarKey, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  function startResize(event: React.MouseEvent) {
+    event.preventDefault();
+    const onMove = (e: MouseEvent) => setSidebarWidth(Math.min(560, Math.max(210, e.clientX)));
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -402,7 +425,7 @@ export default function Home() {
   }
 
   return (
-    <main className="shell" onClick={() => setMenu('')}>
+    <main className="shell" style={{ ['--sidebar-w' as string]: `${sidebarWidth}px` }} onClick={() => setMenu('')}>
       {lockModal && (
         <LockModal
           mode={lockModal}
@@ -601,6 +624,8 @@ export default function Home() {
         </div>
       </aside>
 
+      <div className="resizer" onMouseDown={startResize} role="separator" aria-label="Resize sidebar" aria-orientation="vertical" />
+
       <section className="workspace">
         <div className="tabstrip">
           {openTabs.map((id) => {
@@ -635,6 +660,7 @@ export default function Home() {
 
         {active ? (
           <div className="panel">
+            <div className="request-pane">
             <form className="composer" onSubmit={sendRequest}>
               <div className="urlbar">
                 <select value={active.method} onChange={(e) => updateActive({ method: e.target.value })} className={`method-select m-${active.method}`}>
@@ -711,6 +737,7 @@ export default function Home() {
                   onRemove={(id) => setVariables((rows) => rows.filter((r) => r.id !== id))}
                 />
               )}
+            </div>
             </div>
 
             <div className="response">
