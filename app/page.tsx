@@ -62,6 +62,7 @@ const themes: Theme[] = [
 const storageKey = 'post-bda-workspace-v2';
 const themeKey = 'post-bda-theme';
 const sidebarKey = 'post-bda-sidebar-w';
+const responseKey = 'post-bda-response-h';
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const blankRow = (): KeyValue => ({ id: uid(), key: '', value: '', enabled: true });
@@ -137,6 +138,7 @@ export default function Home() {
   const [sessionOnly, setSessionOnly] = useState(false);
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
+  const [responseHeight, setResponseHeight] = useState(320);
   const [extractOpen, setExtractOpen] = useState(false);
   const [extractPath, setExtractPath] = useState('');
   const [extractName, setExtractName] = useState('');
@@ -150,11 +152,17 @@ export default function Home() {
     if (savedTheme) setTheme(savedTheme);
     const savedWidth = Number(localStorage.getItem(sidebarKey));
     if (savedWidth) setSidebarWidth(Math.min(560, Math.max(210, savedWidth)));
+    const savedHeight = Number(localStorage.getItem(responseKey));
+    if (savedHeight) setResponseHeight(Math.max(120, savedHeight));
   }, []);
 
   useEffect(() => {
     localStorage.setItem(sidebarKey, String(sidebarWidth));
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    localStorage.setItem(responseKey, String(responseHeight));
+  }, [responseHeight]);
 
   function startResize(event: React.MouseEvent) {
     event.preventDefault();
@@ -168,6 +176,22 @@ export default function Home() {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
     document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }
+
+  function startResizeResponse(event: React.MouseEvent) {
+    event.preventDefault();
+    const onMove = (e: MouseEvent) =>
+      setResponseHeight(Math.min(window.innerHeight * 0.85, Math.max(120, window.innerHeight - e.clientY)));
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
   }
 
@@ -749,7 +773,7 @@ export default function Home() {
         </div>
 
         {active ? (
-          <div className="panel">
+          <div className="panel" style={{ ['--response-h' as string]: `${responseHeight}px` }}>
             <div className="request-pane">
             <form className="composer" onSubmit={sendRequest}>
               <div className="urlbar">
@@ -829,6 +853,8 @@ export default function Home() {
               )}
             </div>
             </div>
+
+            <div className="h-resizer" onMouseDown={startResizeResponse} role="separator" aria-label="Resize response" aria-orientation="horizontal" />
 
             <div className="response">
               <div className="response-head">
