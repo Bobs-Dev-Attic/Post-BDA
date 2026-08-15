@@ -1204,7 +1204,19 @@ export default function Home() {
                 ) : respView === 'raw' ? (
                   <pre className="response-body">{response.body}</pre>
                 ) : response.isJson ? (
-                  <pre className="response-body json" dangerouslySetInnerHTML={{ __html: highlightJson(response.pretty) }} />
+                  extractOpen ? (
+                    <ExtractTree
+                      body={response.body}
+                      pretty={response.pretty}
+                      selected={extractPath.trim()}
+                      onPick={(p) => {
+                        setExtractPath(p);
+                        setExtractMsg('');
+                      }}
+                    />
+                  ) : (
+                    <pre className="response-body json" dangerouslySetInnerHTML={{ __html: highlightJson(response.pretty) }} />
+                  )
                 ) : (
                   <pre className="response-body">{response.pretty}</pre>
                 ))}
@@ -1561,6 +1573,117 @@ function highlightJson(json: string) {
       }
       return `<span class="${cls}">${match}</span>`;
     },
+  );
+}
+
+// Interactive JSON path-picker shown while "Extract → var" is open: clicking a
+// value fills the Path field; clicking an object/array row picks that node.
+function ExtractTree({
+  body,
+  pretty,
+  selected,
+  onPick,
+}: {
+  body: string;
+  pretty: string;
+  selected: string;
+  onPick: (path: string) => void;
+}) {
+  let data: unknown;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    return <pre className="response-body json" dangerouslySetInnerHTML={{ __html: highlightJson(pretty) }} />;
+  }
+  return (
+    <div className="response-body json jp-tree">
+      <p className="jp-help">
+        Click a value to set the Path. Click an object/array’s key to pick that whole node. Leave Path blank for the
+        entire body.
+      </p>
+      <JsonTree value={data} path="" selected={selected} onPick={onPick} />
+    </div>
+  );
+}
+
+function JsonTree({
+  value,
+  path,
+  keyLabel,
+  isIndex,
+  selected,
+  onPick,
+}: {
+  value: unknown;
+  path: string;
+  keyLabel?: string;
+  isIndex?: boolean;
+  selected: string;
+  onPick: (path: string) => void;
+}) {
+  const isSel = path !== '' && path === selected;
+  const label =
+    keyLabel !== undefined ? (
+      <>
+        <span className={isIndex ? 'jp-index' : 'j-key'}>{isIndex ? keyLabel : `"${keyLabel}"`}</span>
+        <span className="jp-colon">: </span>
+      </>
+    ) : null;
+
+  if (value !== null && typeof value === 'object') {
+    const isArr = Array.isArray(value);
+    const entries: [string, unknown][] = isArr
+      ? (value as unknown[]).map((v, i) => [String(i), v])
+      : Object.entries(value as Record<string, unknown>);
+    const open = isArr ? '[' : '{';
+    const close = isArr ? ']' : '}';
+    return (
+      <div className="jp-node">
+        <div className={isSel ? 'jp-line sel' : 'jp-line'}>
+          {label && (
+            <span className="jp-pick" onClick={() => path && onPick(path)} title={path ? `Pick ${path}` : undefined}>
+              {label}
+            </span>
+          )}
+          <span className="jp-brace">{open}</span>
+          {entries.length === 0 && <span className="jp-brace">{close}</span>}
+        </div>
+        {entries.length > 0 && (
+          <div className="jp-children">
+            {entries.map(([k, v]) => (
+              <JsonTree
+                key={k}
+                value={v}
+                path={isArr ? `${path}[${k}]` : path ? `${path}.${k}` : k}
+                keyLabel={k}
+                isIndex={isArr}
+                selected={selected}
+                onPick={onPick}
+              />
+            ))}
+          </div>
+        )}
+        {entries.length > 0 && <div className="jp-brace jp-close">{close}</div>}
+      </div>
+    );
+  }
+
+  const cls =
+    typeof value === 'string'
+      ? 'j-str'
+      : typeof value === 'number'
+        ? 'j-num'
+        : typeof value === 'boolean'
+          ? 'j-bool'
+          : 'j-null';
+  const text = typeof value === 'string' ? `"${value}"` : String(value);
+  return (
+    <div className={isSel ? 'jp-line sel' : 'jp-line'}>
+      <span className="jp-pick" onClick={() => onPick(path)} title={`Pick ${path || '(whole body)'}`}>
+        {label}
+        <span className={cls}>{text}</span>
+      </span>
+    </div>
   );
 }
 
