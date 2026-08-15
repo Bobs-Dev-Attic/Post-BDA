@@ -46,11 +46,21 @@ type WorkspaceData = {
   openTabs: string[];
   activeId: string;
   expanded: Record<string, boolean>;
+  sessionOnly: boolean;
 };
 type Envelope = { enc: true; v: number; salt: string; iv: string; ct: string };
+type Theme = { id: string; name: string; swatch: string };
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'];
+const themes: Theme[] = [
+  { id: 'midnight', name: 'Midnight', swatch: '#0b1220' },
+  { id: 'graphite', name: 'Graphite', swatch: '#17181c' },
+  { id: 'ocean', name: 'Ocean', swatch: '#07222b' },
+  { id: 'grape', name: 'Grape', swatch: '#161031' },
+  { id: 'light', name: 'Light', swatch: '#f4f6fb' },
+];
 const storageKey = 'post-bda-workspace-v2';
+const themeKey = 'post-bda-theme';
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const blankRow = (): KeyValue => ({ id: uid(), key: '', value: '', enabled: true });
@@ -58,6 +68,17 @@ const defaultAuth = (): Auth => ({ type: 'none', token: '', username: '', passwo
 
 function normalizeRequest(request: RequestConfig): RequestConfig {
   return { ...request, auth: { ...defaultAuth(), ...request.auth } };
+}
+
+// Strip secret values so they are never written to storage (session-only mode).
+// Structure is preserved (auth type, api-key name, variable names) — only the
+// sensitive values are blanked.
+function redactSecrets(ws: WorkspaceData): WorkspaceData {
+  return {
+    ...ws,
+    requests: ws.requests.map((r) => ({ ...r, auth: { ...r.auth, token: '', username: '', password: '', value: '' } })),
+    variables: ws.variables.map((v) => ({ ...v, value: '' })),
+  };
 }
 
 function makeRequest(patch: Partial<RequestConfig> = {}): RequestConfig {
@@ -112,8 +133,20 @@ export default function Home() {
   const [locked, setLocked] = useState(false);
   const [lockModal, setLockModal] = useState<'' | 'set' | 'change'>('');
   const [lockError, setLockError] = useState('');
+  const [sessionOnly, setSessionOnly] = useState(false);
+  const [theme, setTheme] = useState('midnight');
   const loaded = useRef(false);
   const pendingEnvelope = useRef<Envelope | null>(null);
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem(themeKey);
+    if (savedTheme) setTheme(savedTheme);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(themeKey, theme);
+  }, [theme]);
 
   function loadWorkspace(parsed: WorkspaceData) {
     const cols: Collection[] = parsed.collections ?? [];
@@ -126,6 +159,7 @@ export default function Home() {
     const initialTabs = tabs.length ? tabs : reqs.slice(0, 1).map((r) => r.id);
     setOpenTabs(initialTabs);
     setActiveId(parsed.activeId && initialTabs.includes(parsed.activeId) ? parsed.activeId : initialTabs[0] ?? '');
+    setSessionOnly(parsed.sessionOnly ?? false);
   }
 
   useEffect(() => {
@@ -156,15 +190,16 @@ export default function Home() {
 
   useEffect(() => {
     if (!loaded.current) return;
-    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded };
+    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly };
+    const toStore = sessionOnly ? redactSecrets(workspace) : workspace;
     if (cryptoKey && salt) {
-      encryptWorkspace(cryptoKey, salt, workspace)
+      encryptWorkspace(cryptoKey, salt, toStore)
         .then((env) => localStorage.setItem(storageKey, JSON.stringify(env)))
         .catch(() => {});
     } else {
-      localStorage.setItem(storageKey, JSON.stringify(workspace));
+      localStorage.setItem(storageKey, JSON.stringify(toStore));
     }
-  }, [collections, requests, variables, openTabs, activeId, expanded, cryptoKey, salt]);
+  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, cryptoKey, salt]);
 
   const active = requests.find((r) => r.id === activeId);
   const variableMap = useMemo(
@@ -380,6 +415,44 @@ export default function Home() {
         <div className="side-head">
           <span className="brand">Post-BDA</span>
           <div className="side-actions">
+            <span className="dots-wrap">
+              <button
+                className="icon-btn"
+                title="Settings"
+                aria-label="Settings"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenu(menu === 'settings' ? '' : 'settings');
+                }}
+              >
+                ⚙
+              </button>
+              {menu === 'settings' && (
+                <div className="menu settings-menu" onClick={(e) => e.stopPropagation()}>
+                  <div className="menu-label">Theme</div>
+                  <div className="theme-grid">
+                    {themes.map((t) => (
+                      <button
+                        key={t.id}
+                        className={theme === t.id ? 'swatch active' : 'swatch'}
+                        title={t.name}
+                        aria-label={t.name}
+                        style={{ background: t.swatch }}
+                        onClick={() => setTheme(t.id)}
+                      />
+                    ))}
+                  </div>
+                  <label className="menu-toggle">
+                    <input type="checkbox" checked={sessionOnly} onChange={(e) => setSessionOnly(e.target.checked)} />
+                    <span>Session-only secrets</span>
+                  </label>
+                  <p className="menu-note">
+                    When on, tokens, passwords, API keys, and variable values are kept only in memory and never written to
+                    storage — they clear on reload.
+                  </p>
+                </div>
+              )}
+            </span>
             {cryptoKey ? (
               <span className="dots-wrap">
                 <button
