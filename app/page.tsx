@@ -81,6 +81,7 @@ const storageKey = 'post-bda-workspace-v2';
 const themeKey = 'post-bda-theme';
 const sidebarKey = 'post-bda-sidebar-w';
 const responseKey = 'post-bda-response-h';
+const syncCodeKey = 'post-bda-sync-code';
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const blankRow = (): KeyValue => ({ id: uid(), key: '', value: '', enabled: true });
@@ -168,13 +169,18 @@ export default function Home() {
   const [extractPath, setExtractPath] = useState('');
   const [extractName, setExtractName] = useState('');
   const [extractMsg, setExtractMsg] = useState('');
+  const [syncCode, setSyncCode] = useState('');
+  const [syncMsg, setSyncMsg] = useState('');
+  const [syncBusy, setSyncBusy] = useState(false);
   const loaded = useRef(false);
   const pendingEnvelope = useRef<Envelope | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
+  const passphraseRef = useRef('');
 
   useEffect(() => {
     const savedTheme = localStorage.getItem(themeKey);
     if (savedTheme) setTheme(savedTheme);
+    setSyncCode(localStorage.getItem(syncCodeKey) ?? '');
     const savedWidth = Number(localStorage.getItem(sidebarKey));
     if (savedWidth) setSidebarWidth(Math.min(560, Math.max(210, savedWidth)));
     const savedHeight = Number(localStorage.getItem(responseKey));
@@ -460,6 +466,7 @@ export default function Home() {
       loadWorkspace(workspace);
       setCryptoKey(key);
       setSalt(s);
+      passphraseRef.current = passphrase;
       setLocked(false);
       setLockError('');
       loaded.current = true;
@@ -473,6 +480,7 @@ export default function Home() {
     const key = await deriveKey(passphrase, s);
     setSalt(s);
     setCryptoKey(key);
+    passphraseRef.current = passphrase;
     setLockModal('');
   }
 
@@ -590,6 +598,77 @@ export default function Home() {
     setHistory([]);
   }
 
+  function updateSyncCode(code: string) {
+    setSyncCode(code);
+    localStorage.setItem(syncCodeKey, code);
+  }
+
+  function generateSyncCode() {
+    updateSyncCode(`${uid()}-${uid().slice(0, 8)}`);
+    setSyncMsg('New sync code generated — save it to link other devices.');
+  }
+
+  async function pushSync() {
+    const code = syncCode.trim();
+    if (!code) return setSyncMsg('Enter or generate a sync code first.');
+    if (!cryptoKey || !salt) return setSyncMsg('Set a passphrase first (the lock icon) — sync is end-to-end encrypted.');
+    setSyncBusy(true);
+    setSyncMsg('');
+    try {
+      const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history };
+      const envelope = await encryptWorkspace(cryptoKey, salt, sessionOnly ? redactSecrets(workspace) : workspace);
+      const id = await sha256hex(code);
+      const res = await fetch('/api/sync', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, blob: envelope }),
+      });
+      if (res.ok) setSyncMsg('Pushed to cloud.');
+      else setSyncMsg(`Push failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
+    } catch (caught) {
+      setSyncMsg(caught instanceof Error ? caught.message : 'Push failed.');
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function pullSync() {
+    const code = syncCode.trim();
+    if (!code) return setSyncMsg('Enter your sync code first.');
+    if (!passphraseRef.current) return setSyncMsg('Enter your passphrase first (set or unlock encryption).');
+    setSyncBusy(true);
+    setSyncMsg('');
+    try {
+      const id = await sha256hex(code);
+      const res = await fetch(`/api/sync?id=${id}`);
+      if (res.status === 404) {
+        setSyncMsg('No cloud data for this sync code yet — push from another device first.');
+        return;
+      }
+      if (!res.ok) {
+        setSyncMsg(`Pull failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
+        return;
+      }
+      const { blob } = (await res.json()) as { blob: Envelope };
+      let workspace: WorkspaceData;
+      try {
+        const key = await deriveKey(passphraseRef.current, fromB64(blob.salt));
+        workspace = await decryptWorkspace(key, blob);
+      } catch {
+        setSyncMsg('Could not decrypt — the passphrase does not match this workspace.');
+        return;
+      }
+      if (!window.confirm('Pull will replace your current workspace with the cloud copy. Continue?')) return;
+      loadWorkspace(workspace);
+      setMenu('');
+      setSyncMsg('Pulled from cloud.');
+    } catch (caught) {
+      setSyncMsg(caught instanceof Error ? caught.message : 'Pull failed.');
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   const response = active ? responses[active.id] : undefined;
   const error = active ? errors[active.id] : '';
   const isSending = active ? sending[active.id] : false;
@@ -659,6 +738,31 @@ export default function Home() {
                   <button className="menu-item" onClick={() => importRef.current?.click()}>
                     Import from file
                   </button>
+
+                  <div className="menu-label">Cloud sync (Neon)</div>
+                  <input
+                    className="sync-code"
+                    value={syncCode}
+                    onChange={(e) => updateSyncCode(e.target.value)}
+                    placeholder="Sync code"
+                    spellCheck={false}
+                  />
+                  <div className="sync-actions">
+                    <button className="menu-item" onClick={generateSyncCode} disabled={syncBusy}>
+                      Generate
+                    </button>
+                    <button className="menu-item" onClick={pushSync} disabled={syncBusy}>
+                      Push
+                    </button>
+                    <button className="menu-item" onClick={pullSync} disabled={syncBusy}>
+                      Pull
+                    </button>
+                  </div>
+                  <p className="menu-note">
+                    End-to-end encrypted with your passphrase — set the lock first. Use the same sync code and passphrase on
+                    each device.
+                  </p>
+                  {syncMsg && <p className="menu-note sync-msg">{syncMsg}</p>}
                 </div>
               )}
             </span>
@@ -1432,6 +1536,13 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function sha256hex(text: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function toB64(bytes: Uint8Array) {
