@@ -39,6 +39,21 @@ type ResponseState = {
 };
 type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables';
 type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
+type RequestSnapshot = Pick<RequestConfig, 'method' | 'url' | 'params' | 'headers' | 'body' | 'auth'>;
+type HistoryEntry = {
+  id: string;
+  requestId: string;
+  name: string;
+  method: string;
+  url: string;
+  status: number;
+  ok: boolean;
+  error?: string;
+  durationMs: number;
+  at: string;
+  snapshot: RequestSnapshot;
+};
+type SidebarView = 'collections' | 'history';
 type WorkspaceData = {
   collections: Collection[];
   requests: RequestConfig[];
@@ -47,7 +62,10 @@ type WorkspaceData = {
   activeId: string;
   expanded: Record<string, boolean>;
   sessionOnly: boolean;
+  history: HistoryEntry[];
 };
+
+const HISTORY_LIMIT = 100;
 type Envelope = { enc: true; v: number; salt: string; iv: string; ct: string };
 type Theme = { id: string; name: string; swatch: string };
 
@@ -76,10 +94,15 @@ function normalizeRequest(request: RequestConfig): RequestConfig {
 // Structure is preserved (auth type, api-key name, variable names) — only the
 // sensitive values are blanked.
 function redactSecrets(ws: WorkspaceData): WorkspaceData {
+  const blankAuth = <T extends { auth: Auth }>(r: T): T => ({
+    ...r,
+    auth: { ...r.auth, token: '', username: '', password: '', value: '' },
+  });
   return {
     ...ws,
-    requests: ws.requests.map((r) => ({ ...r, auth: { ...r.auth, token: '', username: '', password: '', value: '' } })),
+    requests: ws.requests.map(blankAuth),
     variables: ws.variables.map((v) => (v.secret ? { ...v, value: '' } : v)),
+    history: ws.history.map((h) => ({ ...h, snapshot: blankAuth(h.snapshot) })),
   };
 }
 
@@ -136,6 +159,8 @@ export default function Home() {
   const [lockModal, setLockModal] = useState<'' | 'set' | 'change'>('');
   const [lockError, setLockError] = useState('');
   const [sessionOnly, setSessionOnly] = useState(false);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
   const [responseHeight, setResponseHeight] = useState(320);
@@ -212,6 +237,7 @@ export default function Home() {
     setOpenTabs(initialTabs);
     setActiveId(parsed.activeId && initialTabs.includes(parsed.activeId) ? parsed.activeId : initialTabs[0] ?? '');
     setSessionOnly(parsed.sessionOnly ?? false);
+    setHistory(parsed.history ?? []);
   }
 
   useEffect(() => {
@@ -242,7 +268,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!loaded.current) return;
-    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly };
+    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history };
     const toStore = sessionOnly ? redactSecrets(workspace) : workspace;
     if (cryptoKey && salt) {
       encryptWorkspace(cryptoKey, salt, toStore)
@@ -251,26 +277,14 @@ export default function Home() {
     } else {
       localStorage.setItem(storageKey, JSON.stringify(toStore));
     }
-  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, cryptoKey, salt]);
+  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, cryptoKey, salt]);
 
   const active = requests.find((r) => r.id === activeId);
   const variableMap = useMemo(
     () => Object.fromEntries(variables.filter((v) => v.enabled && v.key).map((v) => [v.key, v.value])),
     [variables],
   );
-  const hydratedUrl = useMemo(() => {
-    if (!active) return '';
-    const params = active.params.map((p) => ({ ...p, value: applyVariables(p.value, variableMap) }));
-    if (active.auth.type === 'apikey' && active.auth.addTo === 'query' && active.auth.key) {
-      params.push({
-        id: 'auth',
-        key: applyVariables(active.auth.key, variableMap),
-        value: applyVariables(active.auth.value, variableMap),
-        enabled: true,
-      });
-    }
-    return buildUrl(applyVariables(active.url, variableMap), params);
-  }, [active, variableMap]);
+  const hydratedUrl = useMemo(() => (active ? computeUrl(active, variableMap) : ''), [active, variableMap]);
 
   function requestById(id: string) {
     return requests.find((r) => r.id === id);
@@ -363,7 +377,7 @@ export default function Home() {
       app: 'post-bda',
       version: 1,
       exportedAt: new Date().toISOString(),
-      workspace: { collections, requests, variables },
+      workspace: { collections, requests, variables, history },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -391,6 +405,7 @@ export default function Home() {
         setCollections(cols);
         setRequests(reqs);
         setVariables(ws.variables ?? []);
+        setHistory(ws.history ?? []);
         setExpanded(Object.fromEntries(cols.map((c) => [c.id, true])));
         const first = reqs[0]?.id ?? '';
         setOpenTabs(first ? [first] : []);
@@ -467,10 +482,17 @@ export default function Home() {
     // the persist effect will rewrite the workspace as plaintext
   }
 
-  async function sendRequest(event: FormEvent) {
-    event.preventDefault();
-    if (!active) return;
-    const id = active.id;
+  function pushHistory(entry: HistoryEntry) {
+    setHistory((h) => [entry, ...h].slice(0, HISTORY_LIMIT));
+  }
+
+  function snapshotOf(req: RequestConfig): RequestSnapshot {
+    return { method: req.method, url: req.url, params: req.params, headers: req.headers, body: req.body, auth: req.auth };
+  }
+
+  async function runRequest(req: RequestConfig) {
+    const id = req.id;
+    const url = computeUrl(req, variableMap);
     setSending((s) => ({ ...s, [id]: true }));
     setErrors((e) => ({ ...e, [id]: '' }));
     setResponses((r) => {
@@ -481,12 +503,12 @@ export default function Home() {
     const started = performance.now();
     try {
       const headers = Object.fromEntries(
-        active.headers.filter((h) => h.enabled && h.key).map((h) => [h.key, applyVariables(h.value, variableMap)]),
+        req.headers.filter((h) => h.enabled && h.key).map((h) => [h.key, applyVariables(h.value, variableMap)]),
       );
-      applyAuth(headers, active.auth, variableMap);
-      const init: RequestInit = { method: active.method, headers };
-      if (!['GET', 'HEAD'].includes(active.method) && active.body.trim()) init.body = applyVariables(active.body, variableMap);
-      const result = await fetch(hydratedUrl, init);
+      applyAuth(headers, req.auth, variableMap);
+      const init: RequestInit = { method: req.method, headers };
+      if (!['GET', 'HEAD'].includes(req.method) && req.body.trim()) init.body = applyVariables(req.body, variableMap);
+      const result = await fetch(url, init);
       const body = await result.text();
       let pretty = body;
       let isJson = false;
@@ -496,13 +518,14 @@ export default function Home() {
       } catch {
         /* not JSON */
       }
+      const durationMs = Math.round(performance.now() - started);
       setRespView('pretty');
       setResponses((r) => ({
         ...r,
         [id]: {
           status: result.status,
           statusText: result.statusText,
-          duration: Math.round(performance.now() - started),
+          duration: durationMs,
           size: new Blob([body]).size,
           headers: Array.from(result.headers.entries()).map(([key, value]) => ({ id: uid(), key, value, enabled: true })),
           body,
@@ -511,16 +534,66 @@ export default function Home() {
           contentType: result.headers.get('content-type') ?? '',
         },
       }));
+      pushHistory({
+        id: uid(),
+        requestId: id,
+        name: req.name,
+        method: req.method,
+        url,
+        status: result.status,
+        ok: result.status < 400,
+        durationMs,
+        at: now(),
+        snapshot: snapshotOf(req),
+      });
     } catch (caught) {
-      setErrors((e) => ({ ...e, [id]: caught instanceof Error ? caught.message : 'Request failed' }));
+      const message = caught instanceof Error ? caught.message : 'Request failed';
+      setErrors((e) => ({ ...e, [id]: message }));
+      pushHistory({
+        id: uid(),
+        requestId: id,
+        name: req.name,
+        method: req.method,
+        url,
+        status: 0,
+        ok: false,
+        error: message,
+        durationMs: Math.round(performance.now() - started),
+        at: now(),
+        snapshot: snapshotOf(req),
+      });
     } finally {
       setSending((s) => ({ ...s, [id]: false }));
     }
   }
 
+  function sendRequest(event: FormEvent) {
+    event.preventDefault();
+    if (active) runRequest(active);
+  }
+
+  function replayHistory(entry: HistoryEntry) {
+    const req = makeRequest({ ...entry.snapshot, name: entry.name });
+    setRequests((current) => [...current, req]);
+    setOpenTabs((tabs) => [...tabs, req.id]);
+    setActiveId(req.id);
+    setEditorTab('params');
+    setSidebarView('collections');
+    runRequest(req);
+  }
+
+  function deleteHistory(id: string) {
+    setHistory((h) => h.filter((entry) => entry.id !== id));
+  }
+
+  function clearHistory() {
+    setHistory([]);
+  }
+
   const response = active ? responses[active.id] : undefined;
   const error = active ? errors[active.id] : '';
   const isSending = active ? sending[active.id] : false;
+  const nowMs = Date.now();
 
   if (locked) {
     return (
@@ -630,6 +703,22 @@ export default function Home() {
           </div>
         </div>
 
+        <div className="side-tabs">
+          <button
+            className={sidebarView === 'collections' ? 'stab active' : 'stab'}
+            onClick={() => setSidebarView('collections')}
+          >
+            Collections
+          </button>
+          <button
+            className={sidebarView === 'history' ? 'stab active' : 'stab'}
+            onClick={() => setSidebarView('history')}
+          >
+            History{history.length > 0 && <b className="count">{history.length}</b>}
+          </button>
+        </div>
+
+        {sidebarView === 'collections' ? (
         <div className="tree">
           {collections.map((collection) => (
             <div className="tree-collection" key={collection.id}>
@@ -736,6 +825,40 @@ export default function Home() {
             </div>
           ))}
         </div>
+        ) : (
+          <div className="history-list">
+            {history.length === 0 && <div className="tree-empty">No requests sent yet</div>}
+            {history.length > 0 && (
+              <button className="clear-history" onClick={clearHistory}>
+                Clear history
+              </button>
+            )}
+            {history.map((entry) => (
+              <div className="hist-row" key={entry.id} onClick={() => replayHistory(entry)} title="Replay this request">
+                <span className={`method m-${entry.method}`}>{entry.method}</span>
+                <span className="hist-main">
+                  <span className="hist-url">{entry.url || entry.name}</span>
+                  <span className="hist-meta">
+                    <b className={entry.ok ? 'ok' : 'bad'}>{entry.error ? 'ERR' : entry.status}</b>
+                    <span>{entry.durationMs} ms</span>
+                    <span>{timeAgo(entry.at, nowMs)}</span>
+                  </span>
+                </span>
+                <button
+                  className="icon-btn"
+                  title="Delete entry"
+                  aria-label="Delete history entry"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteHistory(entry.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </aside>
 
       <div className="resizer" onMouseDown={startResize} role="separator" aria-label="Resize sidebar" aria-orientation="vertical" />
@@ -1235,6 +1358,30 @@ function applyAuth(headers: Record<string, string>, auth: Auth, variables: Recor
     headers[v(auth.key)] = v(auth.value);
   }
   // apikey + query is applied to the URL, not headers
+}
+
+function computeUrl(req: RequestSnapshot, variables: Record<string, string>) {
+  const params = req.params.map((p) => ({ ...p, value: applyVariables(p.value, variables) }));
+  if (req.auth.type === 'apikey' && req.auth.addTo === 'query' && req.auth.key) {
+    params.push({
+      id: 'auth',
+      key: applyVariables(req.auth.key, variables),
+      value: applyVariables(req.auth.value, variables),
+      enabled: true,
+    });
+  }
+  return buildUrl(applyVariables(req.url, variables), params);
+}
+
+function timeAgo(iso: string, nowMs: number) {
+  const diff = Math.max(0, nowMs - new Date(iso).getTime());
+  const s = Math.round(diff / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
 }
 
 // Resolve a dot/bracket path like "data.items[0].id" against a parsed JSON value.
