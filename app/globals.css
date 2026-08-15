@@ -56,6 +56,30 @@
   --hover: rgba(0, 0, 0, .045); --input-bg: #ffffff; --code-bg: #f5f7fb; --btn-text: #12161f;
   --m-get: #0f9d58; --m-post: #b7791f; --m-put: #2b6cb0; --m-patch: #805ad5; --m-delete: #e53e3e; --m-head: #2c7a7b;
 }
+:root[data-theme='contrast'] {
+  color-scheme: dark;
+  --bg: #000000; --panel: #000000; --panel-2: #0a0a0a; --sidebar: #000000;
+  --line: #ffffff; --line-soft: #6a6a6a; --text: #ffffff; --muted: #d0d0d0;
+  --accent: #ffd400; --accent-end: #ffd400; --active: rgba(255, 212, 0, .28);
+  --hover: rgba(255, 255, 255, .16); --input-bg: #000000; --code-bg: #000000; --btn-text: #000000;
+  --m-get: #00e676; --m-post: #ffd400; --m-put: #40c4ff; --m-patch: #e07bff; --m-delete: #ff5252; --m-head: #18ffff;
+}
+:root[data-theme='lowlight'] {
+  color-scheme: dark;
+  --bg: #0d0b07; --panel: #14110b; --panel-2: #1b160e; --sidebar: #0a0805;
+  --line: #2a2114; --line-soft: #201a10; --text: #d8c9a8; --muted: #8a7c5f;
+  --accent: #c9922e; --accent-end: #b5771f; --active: rgba(201, 146, 46, .16);
+  --hover: rgba(201, 146, 46, .06); --input-bg: #0a0805; --code-bg: #080602; --btn-text: #0d0b07;
+  --m-get: #9bb06a; --m-post: #c9922e; --m-put: #6f9bb0; --m-patch: #a98bc0; --m-delete: #c76a6a; --m-head: #6fb0a8;
+}
+:root[data-theme='monotone'] {
+  color-scheme: dark;
+  --bg: #101215; --panel: #16191d; --panel-2: #1e2226; --sidebar: #0d0f12;
+  --line: #2c3138; --line-soft: #22262b; --text: #e6e9ec; --muted: #8b929b;
+  --accent: #c3c9d1; --accent-end: #9aa2ac; --active: rgba(195, 201, 209, .12);
+  --hover: rgba(255, 255, 255, .05); --input-bg: #0c0e11; --code-bg: #0a0c0f; --btn-text: #101215;
+  --m-get: #cfd4da; --m-post: #b7bdc4; --m-put: #a5abb3; --m-patch: #c0c5cc; --m-delete: #d7dbe0; --m-head: #9298a0;
+}
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
@@ -289,8 +313,18 @@ pre {
 .menu-item:hover { background: var(--hover); }
 .menu-item.danger { color: var(--danger); }
 
-/* settings menu */
-.settings-menu { min-width: 232px; padding: .6rem; gap: .45rem; }
+/* settings menu — anchor left so it opens into the workspace, never off-screen
+   left when the sidebar is narrow; cap to the viewport so it stays reachable */
+.settings-menu {
+  left: 0;
+  right: auto;
+  min-width: 232px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  padding: .6rem;
+  gap: .45rem;
+}
 .menu-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); padding: .1rem .2rem; font-weight: 700; }
 .theme-grid { display: flex; gap: .4rem; flex-wrap: wrap; padding: .15rem .2rem .35rem; }
 .swatch { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; padding: 0; }

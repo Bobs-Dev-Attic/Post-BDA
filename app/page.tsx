@@ -76,6 +76,9 @@ const themes: Theme[] = [
   { id: 'ocean', name: 'Ocean', swatch: '#07222b' },
   { id: 'grape', name: 'Grape', swatch: '#161031' },
   { id: 'light', name: 'Light', swatch: '#f4f6fb' },
+  { id: 'contrast', name: 'High contrast', swatch: '#000000' },
+  { id: 'lowlight', name: 'Low light', swatch: '#12100b' },
+  { id: 'monotone', name: 'Monotone', swatch: '#101215' },
 ];
 const storageKey = 'post-bda-workspace-v2';
 const themeKey = 'post-bda-theme';
