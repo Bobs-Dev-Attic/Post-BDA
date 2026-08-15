@@ -124,6 +124,7 @@ pre {
   background: transparent;
   border-left: 1px solid var(--line);
   transition: background .15s ease;
+  touch-action: none;
 }
 .resizer:hover, .resizer:active { background: var(--accent); }
 
@@ -499,6 +500,7 @@ pre {
   border-top: 1px solid var(--line);
   background: transparent;
   transition: background .15s ease;
+  touch-action: none;
 }
 .h-resizer:hover, .h-resizer:active { background: var(--accent); }
 .response { flex: 0 0 auto; height: var(--response-h, 40vh); min-height: 120px; overflow: auto; padding: 1rem 1.25rem 1.5rem; display: grid; gap: .7rem; align-content: start; }
@@ -672,6 +674,20 @@ pre {
   }
   .lang-tag { align-self: center; }
 
-  .response { height: auto; max-height: none; }
-  .h-resizer { display: none; }
+  /* keep the response resizable by touch: taller grip with a visible handle */
+  .h-resizer {
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .h-resizer::before {
+    content: '';
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--line);
+  }
+  .h-resizer:active::before { background: var(--accent); }
+  .response { max-height: none; }
 }
