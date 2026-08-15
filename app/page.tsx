@@ -15,8 +15,19 @@ type RequestConfig = {
   updatedAt: string;
 };
 type Collection = { id: string; name: string; requestIds: string[] };
-type ResponseState = { status: number; statusText: string; duration: number; headers: KeyValue[]; body: string };
+type ResponseState = {
+  status: number;
+  statusText: string;
+  duration: number;
+  size: number;
+  headers: KeyValue[];
+  body: string;
+  pretty: string;
+  isJson: boolean;
+  contentType: string;
+};
 type EditorTab = 'params' | 'headers' | 'body' | 'variables';
+type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'];
 const storageKey = 'post-bda-workspace-v2';
@@ -67,6 +78,7 @@ export default function Home() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [sending, setSending] = useState<Record<string, boolean>>({});
   const [editorTab, setEditorTab] = useState<EditorTab>('params');
+  const [respView, setRespView] = useState<ResponseView>('pretty');
   const [menu, setMenu] = useState<string>('');
   const [renaming, setRenaming] = useState<string>('');
   const loaded = useRef(false);
@@ -224,14 +236,27 @@ export default function Home() {
       if (!['GET', 'HEAD'].includes(active.method) && active.body.trim()) init.body = applyVariables(active.body, variableMap);
       const result = await fetch(hydratedUrl, init);
       const body = await result.text();
+      let pretty = body;
+      let isJson = false;
+      try {
+        pretty = JSON.stringify(JSON.parse(body), null, 2);
+        isJson = true;
+      } catch {
+        /* not JSON */
+      }
+      setRespView('pretty');
       setResponses((r) => ({
         ...r,
         [id]: {
           status: result.status,
           statusText: result.statusText,
           duration: Math.round(performance.now() - started),
+          size: new Blob([body]).size,
           headers: Array.from(result.headers.entries()).map(([key, value]) => ({ id: uid(), key, value, enabled: true })),
-          body: prettyBody(body),
+          body,
+          pretty,
+          isJson,
+          contentType: result.headers.get('content-type') ?? '',
         },
       }));
     } catch (caught) {
@@ -473,15 +498,61 @@ export default function Home() {
                       {response.status} {response.statusText}
                     </b>
                     <span>{response.duration} ms</span>
-                    <span>{response.headers.length} headers</span>
+                    <span>{formatBytes(response.size)}</span>
                   </div>
                 )}
               </div>
+
               {error && <p className="error">{error}</p>}
-              {response ? (
-                <pre>{response.body}</pre>
-              ) : (
-                !error && <p className="empty">Send a request to inspect status, headers, timing, and body.</p>
+
+              {response && (
+                <div className="response-toolbar">
+                  <div className="view-switch">
+                    {(['pretty', 'raw', 'preview', 'headers'] as ResponseView[]).map((view) => (
+                      <button
+                        key={view}
+                        className={respView === view ? 'seg active' : 'seg'}
+                        onClick={() => setRespView(view)}
+                      >
+                        {view === 'pretty' ? 'Pretty' : view === 'raw' ? 'Raw' : view === 'preview' ? 'Preview' : 'Headers'}
+                        {view === 'headers' && <b className="count">{response.headers.length}</b>}
+                      </button>
+                    ))}
+                  </div>
+                  {response.isJson && respView === 'pretty' && <span className="lang-tag">JSON</span>}
+                  <button
+                    className="copy-btn"
+                    onClick={() =>
+                      navigator.clipboard?.writeText(respView === 'raw' ? response.body : response.pretty)
+                    }
+                  >
+                    Copy
+                  </button>
+                </div>
+              )}
+
+              {response &&
+                (respView === 'headers' ? (
+                  <div className="header-table">
+                    {response.headers.map((h) => (
+                      <div className="header-row" key={h.id}>
+                        <span className="h-key">{h.key}</span>
+                        <span className="h-val">{h.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : respView === 'preview' ? (
+                  <iframe className="preview-frame" title="Response preview" sandbox="" srcDoc={response.body} />
+                ) : respView === 'raw' ? (
+                  <pre className="response-body">{response.body}</pre>
+                ) : response.isJson ? (
+                  <pre className="response-body json" dangerouslySetInnerHTML={{ __html: highlightJson(response.pretty) }} />
+                ) : (
+                  <pre className="response-body">{response.pretty}</pre>
+                ))}
+
+              {!response && !error && (
+                <p className="empty">Send a request to inspect status, headers, timing, and body.</p>
               )}
             </div>
           </div>
@@ -582,10 +653,30 @@ function buildUrl(rawUrl: string, params: KeyValue[]) {
   }
 }
 
-function prettyBody(body: string) {
-  try {
-    return JSON.stringify(JSON.parse(body), null, 2);
-  } catch {
-    return body;
-  }
+function escapeHtml(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function highlightJson(json: string) {
+  const escaped = escapeHtml(json);
+  return escaped.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
+    (match) => {
+      let cls = 'j-num';
+      if (/^"/.test(match)) {
+        cls = /:$/.test(match) ? 'j-key' : 'j-str';
+      } else if (/true|false/.test(match)) {
+        cls = 'j-bool';
+      } else if (/null/.test(match)) {
+        cls = 'j-null';
+      }
+      return `<span class="${cls}">${match}</span>`;
+    },
+  );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

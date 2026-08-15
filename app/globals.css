@@ -293,6 +293,74 @@ pre {
 }
 .empty { color: var(--muted); margin: 0; }
 
+/* response view toolbar */
+.response-toolbar { display: flex; align-items: center; gap: .6rem; }
+.view-switch { display: inline-flex; background: #0a1120; border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg {
+  padding: .32rem .7rem;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+.seg:hover { color: var(--text); }
+.seg.active { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.lang-tag {
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  color: var(--m-post);
+  border: 1px solid rgba(246, 182, 75, .4);
+  background: rgba(246, 182, 75, .1);
+  padding: .1rem .4rem;
+  border-radius: 5px;
+}
+.copy-btn {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 600;
+  padding: .32rem .7rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.copy-btn:hover { color: var(--text); background: var(--hover); }
+
+.response-body { max-height: 420px; }
+
+/* JSON syntax colors */
+.response-body.json .j-key { color: #7ea8ff; }
+.response-body.json .j-str { color: #7ee0a1; }
+.response-body.json .j-num { color: #f6b64b; }
+.response-body.json .j-bool { color: #c792ea; font-weight: 600; }
+.response-body.json .j-null { color: #fb7185; font-weight: 600; }
+
+/* preview iframe */
+.preview-frame {
+  width: 100%;
+  min-height: 320px;
+  max-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+/* response headers table */
+.header-table {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 420px;
+  background: #070d18;
+}
+.header-row { display: grid; grid-template-columns: minmax(140px, 240px) 1fr; gap: 1rem; padding: .5rem .8rem; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+.header-row:last-child { border-bottom: 0; }
+.h-key { color: #7ea8ff; font-weight: 600; word-break: break-word; }
+.h-val { color: var(--text); word-break: break-word; font-family: "SFMono-Regular", Consolas, ui-monospace, monospace; }
+
 /* blank state */
 .blank { flex: 1; display: grid; place-items: center; color: var(--muted); padding: 2rem; text-align: center; }
 
