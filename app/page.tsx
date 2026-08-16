@@ -66,7 +66,8 @@ type HistoryEntry = {
   at: string;
   snapshot: RequestSnapshot;
 };
-type SidebarView = 'collections' | 'history';
+type SidebarView = 'collections' | 'history' | 'runbooks';
+type Runbook = { id: string; name: string; stepIds: string[] };
 type WorkspaceData = {
   collections: Collection[];
   requests: RequestConfig[];
@@ -76,6 +77,7 @@ type WorkspaceData = {
   expanded: Record<string, boolean>;
   sessionOnly: boolean;
   history: HistoryEntry[];
+  runbooks?: Runbook[];
 };
 
 const HISTORY_LIMIT = 100;
@@ -190,6 +192,7 @@ export default function Home() {
   const [sessionOnly, setSessionOnly] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
+  const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [runnerStepIds, setRunnerStepIds] = useState<string[]>([]);
@@ -197,6 +200,7 @@ export default function Home() {
   const [runnerStatus, setRunnerStatus] = useState<Record<string, RunnerStepStatus>>({});
   const [runnerBusy, setRunnerBusy] = useState(false);
   const [runnerStopOnError, setRunnerStopOnError] = useState(true);
+  const [runnerTitle, setRunnerTitle] = useState('Run in order');
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
   const [responseHeight, setResponseHeight] = useState(320);
@@ -291,6 +295,7 @@ export default function Home() {
     setActiveId(parsed.activeId && initialTabs.includes(parsed.activeId) ? parsed.activeId : initialTabs[0] ?? '');
     setSessionOnly(parsed.sessionOnly ?? false);
     setHistory(parsed.history ?? []);
+    setRunbooks(parsed.runbooks ?? []);
   }
 
   useEffect(() => {
@@ -321,7 +326,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!loaded.current) return;
-    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history };
+    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks };
     const toStore = sessionOnly ? redactSecrets(workspace) : workspace;
     if (cryptoKey && salt) {
       encryptWorkspace(cryptoKey, salt, toStore)
@@ -330,7 +335,7 @@ export default function Home() {
     } else {
       localStorage.setItem(storageKey, JSON.stringify(toStore));
     }
-  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, cryptoKey, salt]);
+  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks, cryptoKey, salt]);
 
   // Automatic cloud sync: debounced push whenever the workspace changes.
   useEffect(() => {
@@ -347,7 +352,7 @@ export default function Home() {
     return () => {
       if (autoPushTimer.current) clearTimeout(autoPushTimer.current);
     };
-  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, autoSync, syncCode, cryptoKey, salt]);
+  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks, autoSync, syncCode, cryptoKey, salt]);
 
   // Automatic cloud sync: pull the latest cloud copy once on startup (after the
   // passphrase is available), so a reload or another device picks up changes.
@@ -457,7 +462,7 @@ export default function Home() {
       app: 'post-bda',
       version: 1,
       exportedAt: new Date().toISOString(),
-      workspace: { collections, requests, variables, history },
+      workspace: { collections, requests, variables, history, runbooks },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -486,6 +491,7 @@ export default function Home() {
         setRequests(reqs);
         setVariables(ws.variables ?? []);
         setHistory(ws.history ?? []);
+        setRunbooks(ws.runbooks ?? []);
         setExpanded(Object.fromEntries(cols.map((c) => [c.id, true])));
         const first = reqs[0]?.id ?? '';
         setOpenTabs(first ? [first] : []);
@@ -782,15 +788,57 @@ export default function Home() {
     setRunnerBusy(false);
   }
 
-  function openRunner(collectionId: string) {
-    const col = collections.find((c) => c.id === collectionId);
-    if (!col) return;
-    setRunnerStepIds(col.requestIds.slice());
+  function openRunnerWithSteps(stepIds: string[], title: string) {
+    setRunnerStepIds(stepIds.slice());
+    setRunnerTitle(title);
     setRunnerDisabled({});
     setRunnerStatus({});
     setRunnerOpen(true);
     setMenu('');
     setDrawerOpen(false);
+  }
+
+  function openRunner(collectionId: string) {
+    const col = collections.find((c) => c.id === collectionId);
+    if (!col) return;
+    openRunnerWithSteps(col.requestIds, `Run: ${col.name}`);
+  }
+
+  // ---- Runbooks (cross-collection saved sequences) ----
+  function addRunbook() {
+    const rb: Runbook = { id: uid(), name: `Runbook ${runbooks.length + 1}`, stepIds: [] };
+    setRunbooks((list) => [...list, rb]);
+  }
+  function updateRunbook(id: string, patch: Partial<Runbook>) {
+    setRunbooks((list) => list.map((rb) => (rb.id === id ? { ...rb, ...patch } : rb)));
+  }
+  function deleteRunbook(id: string) {
+    setRunbooks((list) => list.filter((rb) => rb.id !== id));
+  }
+  function addRunbookStep(id: string, requestId: string) {
+    if (!requestId) return;
+    setRunbooks((list) => list.map((rb) => (rb.id === id ? { ...rb, stepIds: [...rb.stepIds, requestId] } : rb)));
+  }
+  function removeRunbookStep(id: string, index: number) {
+    setRunbooks((list) =>
+      list.map((rb) => (rb.id === id ? { ...rb, stepIds: rb.stepIds.filter((_, i) => i !== index) } : rb)),
+    );
+  }
+  function moveRunbookStep(id: string, index: number, dir: -1 | 1) {
+    setRunbooks((list) =>
+      list.map((rb) => {
+        if (rb.id !== id) return rb;
+        const j = index + dir;
+        if (j < 0 || j >= rb.stepIds.length) return rb;
+        const next = rb.stepIds.slice();
+        [next[index], next[j]] = [next[j], next[index]];
+        return { ...rb, stepIds: next };
+      }),
+    );
+  }
+  function runRunbook(rb: Runbook) {
+    const valid = rb.stepIds.filter((id) => requestById(id));
+    if (valid.length) openRunnerWithSteps(valid, `Run: ${rb.name}`);
   }
 
   function moveStep(id: string, dir: -1 | 1) {
@@ -851,7 +899,7 @@ export default function Home() {
     const code = syncCode.trim();
     if (!code || !cryptoKey || !salt) return false;
     try {
-      const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history };
+      const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks };
       const envelope = await encryptWorkspace(cryptoKey, salt, sessionOnly ? redactSecrets(workspace) : workspace);
       const id = await sha256hex(code);
       const res = await fetch('/api/sync', {
@@ -1024,7 +1072,7 @@ export default function Home() {
         <div className="lock-backdrop" onClick={() => !runnerBusy && setRunnerOpen(false)}>
           <div className="runner-card" onClick={(e) => e.stopPropagation()}>
             <div className="runner-head">
-              <h2>Run in order</h2>
+              <h2>{runnerTitle}</h2>
               <button className="icon-btn" onClick={() => !runnerBusy && setRunnerOpen(false)} aria-label="Close">
                 ×
               </button>
@@ -1241,6 +1289,12 @@ export default function Home() {
             Collections
           </button>
           <button
+            className={sidebarView === 'runbooks' ? 'stab active' : 'stab'}
+            onClick={() => setSidebarView('runbooks')}
+          >
+            Runbooks{runbooks.length > 0 && <b className="count">{runbooks.length}</b>}
+          </button>
+          <button
             className={sidebarView === 'history' ? 'stab active' : 'stab'}
             onClick={() => setSidebarView('history')}
           >
@@ -1356,6 +1410,95 @@ export default function Home() {
             </div>
           ))}
         </div>
+        ) : sidebarView === 'runbooks' ? (
+          <div className="runbook-list">
+            <button className="rb-new" onClick={addRunbook}>
+              + New runbook
+            </button>
+            {runbooks.length === 0 && (
+              <div className="tree-empty">No runbooks yet — create one to chain requests from any collection.</div>
+            )}
+            {runbooks.map((rb) => (
+              <div className="rb-card" key={rb.id}>
+                <div className="rb-head">
+                  <input
+                    className="rb-name"
+                    value={rb.name}
+                    spellCheck={false}
+                    aria-label="Runbook name"
+                    onChange={(e) => updateRunbook(rb.id, { name: e.target.value })}
+                  />
+                  <button
+                    className="icon-btn rb-run"
+                    title="Run runbook"
+                    aria-label="Run runbook"
+                    disabled={rb.stepIds.length === 0}
+                    onClick={() => runRunbook(rb)}
+                  >
+                    ▶
+                  </button>
+                  <button className="icon-btn" title="Delete runbook" aria-label="Delete runbook" onClick={() => deleteRunbook(rb.id)}>
+                    ×
+                  </button>
+                </div>
+                <div className="rb-steps">
+                  {rb.stepIds.length === 0 && <div className="tree-empty">No steps yet</div>}
+                  {rb.stepIds.map((sid, i) => {
+                    const req = requestById(sid);
+                    return (
+                      <div className="rb-step" key={`${sid}-${i}`}>
+                        <span className="rb-idx">{i + 1}</span>
+                        {req ? (
+                          <>
+                            <span className={`method m-${req.method}`}>{req.method}</span>
+                            <span className="rb-step-name">{req.name}</span>
+                          </>
+                        ) : (
+                          <span className="rb-step-name rb-missing">(deleted request)</span>
+                        )}
+                        <span className="rb-step-actions">
+                          <button className="icon-btn" disabled={i === 0} onClick={() => moveRunbookStep(rb.id, i, -1)} aria-label="Move up">
+                            ↑
+                          </button>
+                          <button
+                            className="icon-btn"
+                            disabled={i === rb.stepIds.length - 1}
+                            onClick={() => moveRunbookStep(rb.id, i, 1)}
+                            aria-label="Move down"
+                          >
+                            ↓
+                          </button>
+                          <button className="icon-btn" onClick={() => removeRunbookStep(rb.id, i)} aria-label="Remove step">
+                            ×
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <select
+                  className="rb-add"
+                  value=""
+                  aria-label="Add step to runbook"
+                  onChange={(e) => addRunbookStep(rb.id, e.target.value)}
+                >
+                  <option value="">+ Add step…</option>
+                  {collections.map((col) => (
+                    <optgroup key={col.id} label={col.name}>
+                      {col.requestIds.map((rid) => {
+                        const r = requestById(rid);
+                        return r ? (
+                          <option key={rid} value={rid}>
+                            {r.method} · {r.name}
+                          </option>
+                        ) : null;
+                      })}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="history-list">
             {history.length === 0 && <div className="tree-empty">No requests sent yet</div>}
@@ -1487,6 +1630,7 @@ export default function Home() {
                   {tab === 'params' && countRows(active.params) > 0 && <b className="count">{countRows(active.params)}</b>}
                   {tab === 'auth' && active.auth.type !== 'none' && <b className="dot" aria-hidden />}
                   {tab === 'headers' && countRows(active.headers) > 0 && <b className="count">{countRows(active.headers)}</b>}
+                  {tab === 'variables' && countRows(variables) > 0 && <b className="count">{countRows(variables)}</b>}
                   {tab === 'extract' && (active.extractRules ?? []).some((r) => r.enabled && r.variable.trim()) && (
                     <b className="count">{(active.extractRules ?? []).filter((r) => r.enabled && r.variable.trim()).length}</b>
                   )}
