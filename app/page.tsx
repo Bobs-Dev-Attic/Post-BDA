@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type KeyValue = { id: string; key: string; value: string; enabled: boolean; secret?: boolean };
-type ExtractRule = { id: string; path: string; variable: string; enabled: boolean };
+type ExtractSource = 'body' | 'header';
+type ExtractRule = { id: string; path: string; variable: string; enabled: boolean; source?: ExtractSource };
 type RequestConfig = {
   id: string;
   name: string;
@@ -176,6 +177,7 @@ export default function Home() {
   const [extractPath, setExtractPath] = useState('');
   const [extractName, setExtractName] = useState('');
   const [extractMsg, setExtractMsg] = useState('');
+  const [extractSource, setExtractSource] = useState<ExtractSource>('body');
   const [ruleMsgs, setRuleMsgs] = useState<Record<string, string>>({});
   const [syncCode, setSyncCode] = useState('');
   const [syncMsg, setSyncMsg] = useState('');
@@ -448,19 +450,31 @@ export default function Home() {
 
   // Run a request's saved extraction rules against a fresh JSON body and write
   // each resolved value into the matching variable. Returns a status summary.
-  function applyExtractRules(req: RequestConfig, body: string): string {
+  function applyExtractRules(req: RequestConfig, body: string, headers: Headers): string {
     const rules = (req.extractRules ?? []).filter((r) => r.enabled && r.variable.trim());
     if (!rules.length) return '';
+    const hasBodyRule = rules.some((r) => (r.source ?? 'body') === 'body');
     let data: unknown;
-    try {
-      data = JSON.parse(body);
-    } catch {
-      return 'Auto-extract skipped — response is not JSON.';
+    let jsonOk = true;
+    if (hasBodyRule) {
+      try {
+        data = JSON.parse(body);
+      } catch {
+        jsonOk = false;
+      }
     }
     const done: string[] = [];
     const missed: string[] = [];
     for (const rule of rules) {
-      const val = rule.path.trim() ? resolvePath(data, rule.path.trim()) : data;
+      let val: unknown;
+      if ((rule.source ?? 'body') === 'header') {
+        const hv = headers.get(rule.path.trim());
+        val = hv === null ? undefined : hv;
+      } else if (!jsonOk) {
+        val = undefined;
+      } else {
+        val = rule.path.trim() ? resolvePath(data, rule.path.trim()) : data;
+      }
       if (val === undefined) {
         missed.push(rule.variable.trim());
         continue;
@@ -483,9 +497,11 @@ export default function Home() {
     }
     const rules = active.extractRules ?? [];
     updateActive({
-      extractRules: [...rules, { id: uid(), path: extractPath.trim(), variable: name, enabled: true }],
+      extractRules: [...rules, { id: uid(), path: extractPath.trim(), variable: name, enabled: true, source: extractSource }],
     });
-    setExtractMsg(`Auto-extract rule added: ${extractPath.trim() || '(whole body)'} → {{${name}}}`);
+    const target =
+      extractSource === 'header' ? `header "${extractPath.trim()}"` : extractPath.trim() || '(whole body)';
+    setExtractMsg(`Auto-extract rule added: ${target} → {{${name}}}`);
   }
 
   function extractToVariable() {
@@ -493,6 +509,19 @@ export default function Home() {
     const name = extractName.trim();
     if (!name) {
       setExtractMsg('Enter a variable name.');
+      return;
+    }
+    if (extractSource === 'header') {
+      const hname = extractPath.trim();
+      const found = response.headers.find((h) => h.key.toLowerCase() === hname.toLowerCase());
+      if (!hname || !found) {
+        setExtractMsg(`No response header "${hname || '(name)'}".`);
+        return;
+      }
+      setVariable(name, found.value);
+      setExtractMsg(`Saved header to {{${name}}}.`);
+      setExtractPath('');
+      setExtractName('');
       return;
     }
     try {
@@ -597,7 +626,7 @@ export default function Home() {
           contentType: result.headers.get('content-type') ?? '',
         },
       }));
-      setRuleMsgs((m) => ({ ...m, [id]: applyExtractRules(req, body) }));
+      setRuleMsgs((m) => ({ ...m, [id]: applyExtractRules(req, body, result.headers) }));
       pushHistory({
         id: uid(),
         requestId: id,
@@ -1165,9 +1194,10 @@ export default function Home() {
               {editorTab === 'extract' && (
                 <div className="rules">
                   <p className="auth-hint">
-                    After every response, each enabled rule reads a path from the JSON body and writes it into the named
-                    variable — so a login token can refresh itself with no clicks. Tip: open <b>Extract → var</b> on a
-                    response and use <b>Save as rule</b> to add one by clicking.
+                    After every response, each enabled rule reads a value from the JSON <b>body</b> (by path) or a
+                    response <b>header</b> (by name) and writes it into the named variable — so a login token can refresh
+                    itself with no clicks. Tip: open <b>Extract → var</b> on a response and use <b>Save as rule</b> to add
+                    one.
                   </p>
                   {(active.extractRules ?? []).map((rule) => (
                     <div className="rule-row" key={rule.id}>
@@ -1183,10 +1213,29 @@ export default function Home() {
                           })
                         }
                       />
+                      <select
+                        className="rule-source"
+                        value={rule.source ?? 'body'}
+                        aria-label="Rule source"
+                        onChange={(e) =>
+                          updateActive({
+                            extractRules: (active.extractRules ?? []).map((r) =>
+                              r.id === rule.id ? { ...r, source: e.target.value as ExtractSource } : r,
+                            ),
+                          })
+                        }
+                      >
+                        <option value="body">Body</option>
+                        <option value="header">Header</option>
+                      </select>
                       <input
                         className="rule-path"
                         value={rule.path}
-                        placeholder="Path e.g. data.token (blank = whole body)"
+                        placeholder={
+                          (rule.source ?? 'body') === 'header'
+                            ? 'Header name e.g. x-request-id'
+                            : 'Path e.g. data.token (blank = whole body)'
+                        }
                         spellCheck={false}
                         onChange={(e) =>
                           updateActive({
@@ -1295,12 +1344,37 @@ export default function Home() {
 
               {response && extractOpen && (
                 <div className="extract">
-                  <input
-                    className="extract-path"
-                    value={extractPath}
-                    onChange={(e) => setExtractPath(e.target.value)}
-                    placeholder="Path e.g. data.token or items[0].id (blank = whole body)"
-                  />
+                  <select
+                    className="extract-source"
+                    value={extractSource}
+                    onChange={(e) => setExtractSource(e.target.value as ExtractSource)}
+                    aria-label="Extract source"
+                  >
+                    <option value="body">Body</option>
+                    <option value="header">Header</option>
+                  </select>
+                  {extractSource === 'header' ? (
+                    <input
+                      className="extract-path"
+                      value={extractPath}
+                      onChange={(e) => setExtractPath(e.target.value)}
+                      placeholder="Header name e.g. x-request-id"
+                      list="resp-header-names"
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <input
+                      className="extract-path"
+                      value={extractPath}
+                      onChange={(e) => setExtractPath(e.target.value)}
+                      placeholder="Path e.g. data.token or items[0].id (blank = whole body)"
+                    />
+                  )}
+                  <datalist id="resp-header-names">
+                    {response.headers.map((h) => (
+                      <option key={h.id} value={h.key} />
+                    ))}
+                  </datalist>
                   <input
                     className="extract-name"
                     value={extractName}
@@ -1337,7 +1411,7 @@ export default function Home() {
                   ) : respView === 'raw' ? (
                     <pre className="response-body">{response.body}</pre>
                   ) : response.isJson ? (
-                    extractOpen ? (
+                    extractOpen && extractSource === 'body' ? (
                       <ExtractTree
                         body={response.body}
                         pretty={response.pretty}
