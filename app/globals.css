@@ -493,11 +493,16 @@ pre {
 .add-row:hover { text-decoration: underline; }
 
 /* auto-extract rules editor */
-.rules { display: grid; gap: .55rem; }
-.rule-row { display: grid; grid-template-columns: 28px 88px 1.5fr 16px 1fr 30px; gap: .45rem; align-items: center; }
-.rule-row input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--accent); justify-self: center; }
+.rules { display: grid; gap: .7rem; }
+.rule-row { display: grid; gap: .3rem; }
+.rule-main { display: grid; grid-template-columns: 28px 88px 1.5fr 16px 1fr 30px; gap: .45rem; align-items: center; }
+.rule-main input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--accent); justify-self: center; }
 .rule-source, .extract-source { padding: .5rem .4rem; font-size: .82rem; font-weight: 600; }
 .extract-source { flex: 0 0 auto; width: auto; }
+.rule-extra { display: flex; align-items: center; gap: .5rem; padding-left: 34px; }
+.rule-extra-label { flex: 0 0 auto; color: var(--muted); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.rule-pattern { font-family: "SFMono-Regular", Consolas, ui-monospace, monospace; font-size: 12.5px; }
+.extract-pattern { flex: 1 1 170px; font-family: "SFMono-Regular", Consolas, ui-monospace, monospace; }
 .rule-arrow { color: var(--muted); text-align: center; font-weight: 700; }
 .rule-var { font-family: "SFMono-Regular", Consolas, ui-monospace, monospace; }
 .extract-rule { padding: .5rem .9rem; white-space: nowrap; }

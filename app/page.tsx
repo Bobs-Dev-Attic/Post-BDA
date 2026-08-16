@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type KeyValue = { id: string; key: string; value: string; enabled: boolean; secret?: boolean };
 type ExtractSource = 'body' | 'header';
-type ExtractRule = { id: string; path: string; variable: string; enabled: boolean; source?: ExtractSource };
+type ExtractRule = { id: string; path: string; variable: string; enabled: boolean; source?: ExtractSource; pattern?: string };
 type RequestConfig = {
   id: string;
   name: string;
@@ -179,6 +179,7 @@ export default function Home() {
   const [extractName, setExtractName] = useState('');
   const [extractMsg, setExtractMsg] = useState('');
   const [extractSource, setExtractSource] = useState<ExtractSource>('body');
+  const [extractPattern, setExtractPattern] = useState('');
   const [ruleMsgs, setRuleMsgs] = useState<Record<string, string>>({});
   const [syncCode, setSyncCode] = useState('');
   const [autoSync, setAutoSync] = useState(false);
@@ -507,11 +508,12 @@ export default function Home() {
       } else {
         val = rule.path.trim() ? resolvePath(data, rule.path.trim()) : data;
       }
-      if (val === undefined) {
+      const final = finalizeValue(val, rule.pattern ?? '');
+      if (final === undefined) {
         missed.push(rule.variable.trim());
         continue;
       }
-      setVariable(rule.variable.trim(), typeof val === 'object' ? JSON.stringify(val) : String(val));
+      setVariable(rule.variable.trim(), final);
       done.push(rule.variable.trim());
     }
     const parts: string[] = [];
@@ -529,7 +531,10 @@ export default function Home() {
     }
     const rules = active.extractRules ?? [];
     updateActive({
-      extractRules: [...rules, { id: uid(), path: extractPath.trim(), variable: name, enabled: true, source: extractSource }],
+      extractRules: [
+        ...rules,
+        { id: uid(), path: extractPath.trim(), variable: name, enabled: true, source: extractSource, pattern: extractPattern.trim() },
+      ],
     });
     const target =
       extractSource === 'header' ? `header "${extractPath.trim()}"` : extractPath.trim() || '(whole body)';
@@ -550,10 +555,16 @@ export default function Home() {
         setExtractMsg(`No response header "${hname || '(name)'}".`);
         return;
       }
-      setVariable(name, found.value);
+      const final = finalizeValue(found.value, extractPattern.trim());
+      if (final === undefined) {
+        setExtractMsg('Pattern matched nothing (check the regex).');
+        return;
+      }
+      setVariable(name, final);
       setExtractMsg(`Saved header to {{${name}}}.`);
       setExtractPath('');
       setExtractName('');
+      setExtractPattern('');
       return;
     }
     try {
@@ -563,10 +574,16 @@ export default function Home() {
         setExtractMsg(`No value at "${extractPath.trim()}".`);
         return;
       }
-      setVariable(name, typeof val === 'object' ? JSON.stringify(val) : String(val));
+      const final = finalizeValue(val, extractPattern.trim());
+      if (final === undefined) {
+        setExtractMsg('Pattern matched nothing (check the regex).');
+        return;
+      }
+      setVariable(name, final);
       setExtractMsg(`Saved to {{${name}}}.`);
       setExtractPath('');
       setExtractName('');
+      setExtractPattern('');
     } catch {
       setExtractMsg('Response body is not valid JSON.');
     }
@@ -828,7 +845,11 @@ export default function Home() {
       const hname = extractPath.trim();
       if (!hname) return { text: '', ok: false };
       const found = response.headers.find((h) => h.key.toLowerCase() === hname.toLowerCase());
-      return found ? { text: found.value, ok: true } : { text: 'No response header by that name', ok: false };
+      if (!found) return { text: 'No response header by that name', ok: false };
+      const final = finalizeValue(found.value, extractPattern.trim());
+      return final === undefined
+        ? { text: 'Pattern matched nothing', ok: false }
+        : { text: final, ok: true };
     }
     if (!response.isJson) return { text: '', ok: false };
     let data: unknown;
@@ -839,8 +860,9 @@ export default function Home() {
     }
     const val = extractPath.trim() ? resolvePath(data, extractPath.trim()) : data;
     if (val === undefined) return { text: 'No value at this path', ok: false };
-    return { text: typeof val === 'object' ? JSON.stringify(val) : String(val), ok: true };
-  }, [response, extractOpen, extractSource, extractPath]);
+    const final = finalizeValue(val, extractPattern.trim());
+    return final === undefined ? { text: 'Pattern matched nothing', ok: false } : { text: final, ok: true };
+  }, [response, extractOpen, extractSource, extractPath, extractPattern]);
 
   if (locked) {
     return (
@@ -1296,11 +1318,13 @@ export default function Home() {
                   <p className="auth-hint">
                     After every response, each enabled rule reads a value from the JSON <b>body</b> (by path) or a
                     response <b>header</b> (by name) and writes it into the named variable — so a login token can refresh
-                    itself with no clicks. Tip: open <b>Extract → var</b> on a response and use <b>Save as rule</b> to add
-                    one.
+                    itself with no clicks. Add an optional <b>regex</b> to keep just part of the value (capture group 1, or
+                    the whole match) — e.g. <code>session=([^;]+)</code> from a cookie. Tip: open <b>Extract → var</b> on a
+                    response and use <b>Save as rule</b>.
                   </p>
                   {(active.extractRules ?? []).map((rule) => (
                     <div className="rule-row" key={rule.id}>
+                      <div className="rule-main">
                       <input
                         type="checkbox"
                         checked={rule.enabled}
@@ -1370,6 +1394,23 @@ export default function Home() {
                       >
                         ×
                       </button>
+                      </div>
+                      <div className="rule-extra">
+                        <span className="rule-extra-label">regex</span>
+                        <input
+                          className="rule-pattern"
+                          value={rule.pattern ?? ''}
+                          placeholder="optional — capture group 1 or whole match, e.g. Bearer (.+)"
+                          spellCheck={false}
+                          onChange={(e) =>
+                            updateActive({
+                              extractRules: (active.extractRules ?? []).map((r) =>
+                                r.id === rule.id ? { ...r, pattern: e.target.value } : r,
+                              ),
+                            })
+                          }
+                        />
+                      </div>
                     </div>
                   ))}
                   <button
@@ -1475,6 +1516,14 @@ export default function Home() {
                       <option key={h.id} value={h.key} />
                     ))}
                   </datalist>
+                  <input
+                    className="extract-pattern"
+                    value={extractPattern}
+                    onChange={(e) => setExtractPattern(e.target.value)}
+                    placeholder="Regex (optional) e.g. session=([^;]+)"
+                    spellCheck={false}
+                    title="Optional regex. Uses capture group 1 if present, else the whole match — handy for stripping a prefix like 'Bearer '."
+                  />
                   <input
                     className="extract-name"
                     value={extractName}
@@ -1855,6 +1904,30 @@ function timeAgo(iso: string, nowMs: number) {
 }
 
 // Resolve a dot/bracket path like "data.items[0].id" against a parsed JSON value.
+// Apply an optional regex to a string value. With a capture group, returns
+// group 1; otherwise the whole match. Empty pattern passes the value through;
+// an invalid regex or no match returns undefined (treated as "no value").
+function applyPattern(value: string, pattern: string): string | undefined {
+  const p = pattern.trim();
+  if (!p) return value;
+  let re: RegExp;
+  try {
+    re = new RegExp(p);
+  } catch {
+    return undefined;
+  }
+  const m = re.exec(value);
+  if (!m) return undefined;
+  return m[1] !== undefined ? m[1] : m[0];
+}
+
+// Turn a resolved value into the string to store, applying the optional pattern.
+function finalizeValue(val: unknown, pattern: string): string | undefined {
+  if (val === undefined) return undefined;
+  const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+  return applyPattern(str, pattern);
+}
+
 function resolvePath(obj: unknown, path: string): unknown {
   const parts = path.replace(/\[(\w+)\]/g, '.$1').split('.').filter(Boolean);
   let current: unknown = obj;
