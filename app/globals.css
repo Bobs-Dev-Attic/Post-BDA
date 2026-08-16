@@ -595,6 +595,17 @@ pre {
 .extract-name { flex: 1 1 130px; }
 .extract-save { flex: 0 0 auto; padding: .5rem 1rem; }
 .extract-msg { flex-basis: 100%; color: var(--muted); font-size: .78rem; }
+.extract-preview-wrap { flex: 1 1 100%; display: flex; align-items: center; gap: .5rem; }
+.extract-preview-label { flex: 0 0 auto; color: var(--muted); font-size: .78rem; font-weight: 600; }
+.extract-preview {
+  flex: 1 1 auto;
+  background: var(--code-bg);
+  color: var(--m-get);
+  font-family: "SFMono-Regular", Consolas, ui-monospace, monospace;
+  font-size: 13px;
+  cursor: default;
+}
+.extract-preview.miss { color: var(--muted); font-style: italic; font-family: inherit; }
 
 .response-body { max-height: 420px; }
 

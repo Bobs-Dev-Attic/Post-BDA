@@ -820,6 +820,28 @@ export default function Home() {
   const isSending = active ? sending[active.id] : false;
   const nowMs = Date.now();
 
+  // Live preview of the value the current path/source would capture, so a click
+  // in the JSON body (or a typed path/header) shows what will be saved.
+  const extractPreview = useMemo((): { text: string; ok: boolean } => {
+    if (!response || !extractOpen) return { text: '', ok: false };
+    if (extractSource === 'header') {
+      const hname = extractPath.trim();
+      if (!hname) return { text: '', ok: false };
+      const found = response.headers.find((h) => h.key.toLowerCase() === hname.toLowerCase());
+      return found ? { text: found.value, ok: true } : { text: 'No response header by that name', ok: false };
+    }
+    if (!response.isJson) return { text: '', ok: false };
+    let data: unknown;
+    try {
+      data = JSON.parse(response.body);
+    } catch {
+      return { text: '', ok: false };
+    }
+    const val = extractPath.trim() ? resolvePath(data, extractPath.trim()) : data;
+    if (val === undefined) return { text: 'No value at this path', ok: false };
+    return { text: typeof val === 'object' ? JSON.stringify(val) : String(val), ok: true };
+  }, [response, extractOpen, extractSource, extractPath]);
+
   if (locked) {
     return (
       <main className="lock-screen">
@@ -1459,6 +1481,20 @@ export default function Home() {
                     onChange={(e) => setExtractName(e.target.value)}
                     placeholder="Variable name"
                   />
+                  <label className="extract-preview-wrap">
+                    <span className="extract-preview-label">Value</span>
+                    <input
+                      className={extractPreview.ok ? 'extract-preview' : 'extract-preview miss'}
+                      readOnly
+                      value={extractPreview.text}
+                      title={extractPreview.text}
+                      placeholder={
+                        extractSource === 'header'
+                          ? 'Pick or type a header name to preview its value'
+                          : 'Click a value in the body (or type a path) to preview it'
+                      }
+                    />
+                  </label>
                   <button className="send extract-save" type="button" onClick={extractToVariable}>
                     Save
                   </button>
