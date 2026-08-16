@@ -40,6 +40,16 @@ type ResponseState = {
   isJson: boolean;
   contentType: string;
 };
+type ExecOutcome = {
+  url: string;
+  durationMs: number;
+  status: number;
+  error?: string;
+  responseState?: ResponseState;
+  headers?: Headers;
+  body: string;
+};
+type RunnerStepStatus = { state: 'pending' | 'running' | 'ok' | 'fail'; status?: number; ms?: number; note?: string };
 type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables' | 'extract';
 type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
 type RequestSnapshot = Pick<RequestConfig, 'method' | 'url' | 'params' | 'headers' | 'body' | 'auth'>;
@@ -73,6 +83,16 @@ type Envelope = { enc: true; v: number; salt: string; iv: string; ct: string };
 type Theme = { id: string; name: string; swatch: string };
 
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'];
+// Common regex snippets offered as autocomplete when extracting part of a value.
+const commonRegex = [
+  'Bearer (.+)',
+  'session=([^;]+)',
+  '"token":"([^"]+)"',
+  '([0-9a-fA-F-]{36})',
+  '(\\d+)',
+  '^(\\d+)',
+  '(\\d+)$',
+];
 const themes: Theme[] = [
   { id: 'midnight', name: 'Midnight', swatch: '#0b1220' },
   { id: 'graphite', name: 'Graphite', swatch: '#17181c' },
@@ -171,6 +191,12 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [runnerOpen, setRunnerOpen] = useState(false);
+  const [runnerStepIds, setRunnerStepIds] = useState<string[]>([]);
+  const [runnerDisabled, setRunnerDisabled] = useState<Record<string, boolean>>({});
+  const [runnerStatus, setRunnerStatus] = useState<Record<string, RunnerStepStatus>>({});
+  const [runnerBusy, setRunnerBusy] = useState(false);
+  const [runnerStopOnError, setRunnerStopOnError] = useState(true);
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
   const [responseHeight, setResponseHeight] = useState(320);
@@ -481,11 +507,12 @@ export default function Home() {
     });
   }
 
-  // Run a request's saved extraction rules against a fresh JSON body and write
-  // each resolved value into the matching variable. Returns a status summary.
-  function applyExtractRules(req: RequestConfig, body: string, headers: Headers): string {
+  // Run a request's saved extraction rules against a fresh response. Pure: it
+  // returns the variable updates and a status summary rather than mutating state,
+  // so both single runs and the sequence runner can decide how to apply them.
+  function computeExtracted(req: RequestConfig, body: string, headers: Headers): { updates: Record<string, string>; note: string } {
     const rules = (req.extractRules ?? []).filter((r) => r.enabled && r.variable.trim());
-    if (!rules.length) return '';
+    if (!rules.length) return { updates: {}, note: '' };
     const hasBodyRule = rules.some((r) => (r.source ?? 'body') === 'body');
     let data: unknown;
     let jsonOk = true;
@@ -496,6 +523,7 @@ export default function Home() {
         jsonOk = false;
       }
     }
+    const updates: Record<string, string> = {};
     const done: string[] = [];
     const missed: string[] = [];
     for (const rule of rules) {
@@ -513,13 +541,13 @@ export default function Home() {
         missed.push(rule.variable.trim());
         continue;
       }
-      setVariable(rule.variable.trim(), final);
+      updates[rule.variable.trim()] = final;
       done.push(rule.variable.trim());
     }
     const parts: string[] = [];
     if (done.length) parts.push(`Set ${done.map((n) => `{{${n}}}`).join(', ')}`);
     if (missed.length) parts.push(`No match for ${missed.map((n) => `{{${n}}}`).join(', ')}`);
-    return parts.join(' · ');
+    return { updates, note: parts.join(' · ') };
   }
 
   function addRuleFromExtract() {
@@ -631,24 +659,18 @@ export default function Home() {
     return { method: req.method, url: req.url, params: req.params, headers: req.headers, body: req.body, auth: req.auth };
   }
 
-  async function runRequest(req: RequestConfig) {
-    const id = req.id;
-    const url = computeUrl(req, variableMap);
-    setSending((s) => ({ ...s, [id]: true }));
-    setErrors((e) => ({ ...e, [id]: '' }));
-    setResponses((r) => {
-      const next = { ...r };
-      delete next[id];
-      return next;
-    });
+  // Perform one request against an explicit variable map (not React state), so a
+  // sequence runner can thread freshly-extracted variables into the next step.
+  async function executeRequest(req: RequestConfig, vars: Record<string, string>): Promise<ExecOutcome> {
+    const url = computeUrl(req, vars);
     const started = performance.now();
     try {
       const headers = Object.fromEntries(
-        req.headers.filter((h) => h.enabled && h.key).map((h) => [h.key, applyVariables(h.value, variableMap)]),
+        req.headers.filter((h) => h.enabled && h.key).map((h) => [h.key, applyVariables(h.value, vars)]),
       );
-      applyAuth(headers, req.auth, variableMap);
+      applyAuth(headers, req.auth, vars);
       const init: RequestInit = { method: req.method, headers };
-      if (!['GET', 'HEAD'].includes(req.method) && req.body.trim()) init.body = applyVariables(req.body, variableMap);
+      if (!['GET', 'HEAD'].includes(req.method) && req.body.trim()) init.body = applyVariables(req.body, vars);
       const result = await fetch(url, init);
       const body = await result.text();
       let pretty = body;
@@ -660,53 +682,134 @@ export default function Home() {
         /* not JSON */
       }
       const durationMs = Math.round(performance.now() - started);
-      setRespView('pretty');
-      setResponses((r) => ({
-        ...r,
-        [id]: {
-          status: result.status,
-          statusText: result.statusText,
-          duration: durationMs,
-          size: new Blob([body]).size,
-          headers: Array.from(result.headers.entries()).map(([key, value]) => ({ id: uid(), key, value, enabled: true })),
-          body,
-          pretty,
-          isJson,
-          contentType: result.headers.get('content-type') ?? '',
-        },
-      }));
-      setRuleMsgs((m) => ({ ...m, [id]: applyExtractRules(req, body, result.headers) }));
-      pushHistory({
-        id: uid(),
-        requestId: id,
-        name: req.name,
-        method: req.method,
-        url,
+      const responseState: ResponseState = {
         status: result.status,
-        ok: result.status < 400,
-        durationMs,
-        at: now(),
-        snapshot: snapshotOf(req),
-      });
+        statusText: result.statusText,
+        duration: durationMs,
+        size: new Blob([body]).size,
+        headers: Array.from(result.headers.entries()).map(([key, value]) => ({ id: uid(), key, value, enabled: true })),
+        body,
+        pretty,
+        isJson,
+        contentType: result.headers.get('content-type') ?? '',
+      };
+      return { url, durationMs, status: result.status, responseState, headers: result.headers, body };
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Request failed';
-      setErrors((e) => ({ ...e, [id]: message }));
+      return { url, durationMs: Math.round(performance.now() - started), status: 0, error: message, body: '' };
+    }
+  }
+
+  async function runRequest(req: RequestConfig) {
+    const id = req.id;
+    setSending((s) => ({ ...s, [id]: true }));
+    setErrors((e) => ({ ...e, [id]: '' }));
+    setResponses((r) => {
+      const next = { ...r };
+      delete next[id];
+      return next;
+    });
+    try {
+      const exec = await executeRequest(req, variableMap);
+      if (exec.error || !exec.responseState) {
+        setErrors((e) => ({ ...e, [id]: exec.error ?? 'Request failed' }));
+        pushHistory({
+          id: uid(), requestId: id, name: req.name, method: req.method, url: exec.url,
+          status: 0, ok: false, error: exec.error, durationMs: exec.durationMs, at: now(), snapshot: snapshotOf(req),
+        });
+        return;
+      }
+      setRespView('pretty');
+      setResponses((r) => ({ ...r, [id]: exec.responseState! }));
+      const { updates, note } = computeExtracted(req, exec.body, exec.headers!);
+      Object.entries(updates).forEach(([k, v]) => setVariable(k, v));
+      setRuleMsgs((m) => ({ ...m, [id]: note }));
       pushHistory({
-        id: uid(),
-        requestId: id,
-        name: req.name,
-        method: req.method,
-        url,
-        status: 0,
-        ok: false,
-        error: message,
-        durationMs: Math.round(performance.now() - started),
-        at: now(),
-        snapshot: snapshotOf(req),
+        id: uid(), requestId: id, name: req.name, method: req.method, url: exec.url,
+        status: exec.status, ok: exec.status < 400, durationMs: exec.durationMs, at: now(), snapshot: snapshotOf(req),
       });
     } finally {
       setSending((s) => ({ ...s, [id]: false }));
     }
+  }
+
+  // Fire a list of requests in order, threading extracted variables from each
+  // step into the next. Updates the same response/variable/history state a
+  // single run would, plus per-step runner status.
+  async function runSequence(steps: RequestConfig[]) {
+    setRunnerBusy(true);
+    let vars = { ...variableMap };
+    const results: Record<string, RunnerStepStatus> = {};
+    steps.forEach((s) => (results[s.id] = { state: 'pending' }));
+    setRunnerStatus({ ...results });
+    for (const req of steps) {
+      results[req.id] = { state: 'running' };
+      setRunnerStatus({ ...results });
+      setActiveId(req.id);
+      setOpenTabs((tabs) => (tabs.includes(req.id) ? tabs : [...tabs, req.id]));
+      const exec = await executeRequest(req, vars);
+      if (exec.error || !exec.responseState) {
+        setErrors((e) => ({ ...e, [req.id]: exec.error ?? 'Request failed' }));
+        pushHistory({
+          id: uid(), requestId: req.id, name: req.name, method: req.method, url: exec.url,
+          status: 0, ok: false, error: exec.error, durationMs: exec.durationMs, at: now(), snapshot: snapshotOf(req),
+        });
+        results[req.id] = { state: 'fail', note: exec.error };
+        setRunnerStatus({ ...results });
+        if (runnerStopOnError) break;
+        continue;
+      }
+      setRespView('pretty');
+      setResponses((r) => ({ ...r, [req.id]: exec.responseState! }));
+      setErrors((e) => ({ ...e, [req.id]: '' }));
+      const { updates, note } = computeExtracted(req, exec.body, exec.headers!);
+      Object.entries(updates).forEach(([k, v]) => setVariable(k, v));
+      vars = { ...vars, ...updates }; // thread into the next step immediately
+      setRuleMsgs((m) => ({ ...m, [req.id]: note }));
+      pushHistory({
+        id: uid(), requestId: req.id, name: req.name, method: req.method, url: exec.url,
+        status: exec.status, ok: exec.status < 400, durationMs: exec.durationMs, at: now(), snapshot: snapshotOf(req),
+      });
+      results[req.id] = {
+        state: exec.status < 400 ? 'ok' : 'fail',
+        status: exec.status,
+        ms: exec.durationMs,
+        note: Object.keys(updates).length ? `→ ${Object.keys(updates).map((k) => `{{${k}}}`).join(', ')}` : undefined,
+      };
+      setRunnerStatus({ ...results });
+      if (exec.status >= 400 && runnerStopOnError) break;
+    }
+    setRunnerBusy(false);
+  }
+
+  function openRunner(collectionId: string) {
+    const col = collections.find((c) => c.id === collectionId);
+    if (!col) return;
+    setRunnerStepIds(col.requestIds.slice());
+    setRunnerDisabled({});
+    setRunnerStatus({});
+    setRunnerOpen(true);
+    setMenu('');
+    setDrawerOpen(false);
+  }
+
+  function moveStep(id: string, dir: -1 | 1) {
+    setRunnerStepIds((ids) => {
+      const i = ids.indexOf(id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= ids.length) return ids;
+      const next = ids.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  }
+
+  function startRunner() {
+    const steps = runnerStepIds
+      .filter((id) => !runnerDisabled[id])
+      .map((id) => requestById(id))
+      .filter((r): r is RequestConfig => Boolean(r));
+    if (steps.length) runSequence(steps);
   }
 
   function sendRequest(event: FormEvent) {
@@ -864,6 +967,36 @@ export default function Home() {
     return final === undefined ? { text: 'Pattern matched nothing', ok: false } : { text: final, ok: true };
   }, [response, extractOpen, extractSource, extractPath, extractPattern]);
 
+  // Autocomplete suggestions for the regex field: patterns derived from the
+  // current raw value (before the regex) plus a handful of common ones.
+  const regexOptions = useMemo(() => {
+    const opts: string[] = [];
+    let raw: string | undefined;
+    if (response && extractOpen) {
+      if (extractSource === 'header') {
+        const found = response.headers.find((h) => h.key.toLowerCase() === extractPath.trim().toLowerCase());
+        raw = found?.value;
+      } else if (response.isJson) {
+        try {
+          const data = JSON.parse(response.body);
+          const val = extractPath.trim() ? resolvePath(data, extractPath.trim()) : data;
+          if (val !== undefined) raw = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (raw) {
+      if (/bearer\s+/i.test(raw)) opts.push('Bearer (.+)');
+      const kv = raw.match(/([A-Za-z0-9_.-]+)=([^;]+)/);
+      if (kv) opts.push(`${kv[1]}=([^;]+)`);
+      if (/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/.test(raw)) opts.push('([0-9a-fA-F-]{36})');
+      if (/^\s*-?\d/.test(raw)) opts.push('(\\d+)');
+    }
+    for (const r of commonRegex) if (!opts.includes(r)) opts.push(r);
+    return opts;
+  }, [response, extractOpen, extractSource, extractPath]);
+
   if (locked) {
     return (
       <main className="lock-screen">
@@ -886,6 +1019,87 @@ export default function Home() {
           onSubmit={applyPassphrase}
           onCancel={() => setLockModal('')}
         />
+      )}
+      {runnerOpen && (
+        <div className="lock-backdrop" onClick={() => !runnerBusy && setRunnerOpen(false)}>
+          <div className="runner-card" onClick={(e) => e.stopPropagation()}>
+            <div className="runner-head">
+              <h2>Run in order</h2>
+              <button className="icon-btn" onClick={() => !runnerBusy && setRunnerOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <p className="lock-hint">
+              Requests run top-to-bottom. Variables extracted by each step (auto-extract rules) are threaded into the
+              steps below it — so a login step can set a token the rest reuse.
+            </p>
+            <div className="runner-steps">
+              {runnerStepIds.map((id, i) => {
+                const req = requestById(id);
+                if (!req) return null;
+                const st = runnerStatus[id];
+                const off = !!runnerDisabled[id];
+                return (
+                  <div className={`runner-step ${st?.state ?? ''}${off ? ' off' : ''}`} key={id}>
+                    <input
+                      type="checkbox"
+                      checked={!off}
+                      disabled={runnerBusy}
+                      aria-label="Include step"
+                      onChange={(e) => setRunnerDisabled((d) => ({ ...d, [id]: !e.target.checked }))}
+                    />
+                    <span className="runner-idx">{i + 1}</span>
+                    <span className={`method m-${req.method}`}>{req.method}</span>
+                    <span className="runner-name">{req.name}</span>
+                    <span className="runner-state">
+                      {st?.state === 'running' && <span className="runner-spin">running…</span>}
+                      {st?.state === 'ok' && <b className="ok">{st.status}</b>}
+                      {st?.state === 'fail' && <b className="bad">{st.status ?? '✕'}</b>}
+                      {st?.ms != null && <span className="runner-ms">{st.ms} ms</span>}
+                      {st?.note && <span className="runner-note">{st.note}</span>}
+                    </span>
+                    <span className="runner-move">
+                      <button
+                        className="icon-btn"
+                        disabled={runnerBusy || i === 0}
+                        onClick={() => moveStep(id, -1)}
+                        aria-label="Move up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        className="icon-btn"
+                        disabled={runnerBusy || i === runnerStepIds.length - 1}
+                        onClick={() => moveStep(id, 1)}
+                        aria-label="Move down"
+                      >
+                        ↓
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
+              {runnerStepIds.length === 0 && <div className="tree-empty">This collection has no requests.</div>}
+            </div>
+            <label className="menu-toggle">
+              <input
+                type="checkbox"
+                checked={runnerStopOnError}
+                disabled={runnerBusy}
+                onChange={(e) => setRunnerStopOnError(e.target.checked)}
+              />
+              <span>Stop on first error (status ≥ 400 or network failure)</span>
+            </label>
+            <div className="runner-actions">
+              <button className="btn-ghost" onClick={() => !runnerBusy && setRunnerOpen(false)}>
+                Close
+              </button>
+              <button className="send" onClick={startRunner} disabled={runnerBusy || runnerStepIds.length === 0}>
+                {runnerBusy ? 'Running…' : 'Run sequence'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <aside className="sidebar">
         <div className="side-head">
@@ -1077,6 +1291,7 @@ export default function Home() {
                       setMenu(menu === collection.id ? '' : collection.id);
                     }}
                     items={[
+                      { label: 'Run in order', onClick: () => openRunner(collection.id) },
                       { label: 'Add request', onClick: () => addRequest(collection.id) },
                       { label: 'Rename', onClick: () => setRenaming(collection.id) },
                       { label: 'Delete', danger: true, onClick: () => deleteCollection(collection.id) },
@@ -1322,6 +1537,11 @@ export default function Home() {
                     the whole match) — e.g. <code>session=([^;]+)</code> from a cookie. Tip: open <b>Extract → var</b> on a
                     response and use <b>Save as rule</b>.
                   </p>
+                  <datalist id="regex-suggestions-static">
+                    {commonRegex.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
                   {(active.extractRules ?? []).map((rule) => (
                     <div className="rule-row" key={rule.id}>
                       <div className="rule-main">
@@ -1402,6 +1622,7 @@ export default function Home() {
                           value={rule.pattern ?? ''}
                           placeholder="optional — capture group 1 or whole match, e.g. Bearer (.+)"
                           spellCheck={false}
+                          list="regex-suggestions-static"
                           onChange={(e) =>
                             updateActive({
                               extractRules: (active.extractRules ?? []).map((r) =>
@@ -1522,8 +1743,14 @@ export default function Home() {
                     onChange={(e) => setExtractPattern(e.target.value)}
                     placeholder="Regex (optional) e.g. session=([^;]+)"
                     spellCheck={false}
+                    list="regex-suggestions"
                     title="Optional regex. Uses capture group 1 if present, else the whole match — handy for stripping a prefix like 'Bearer '."
                   />
+                  <datalist id="regex-suggestions">
+                    {regexOptions.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
                   <input
                     className="extract-name"
                     value={extractName}
