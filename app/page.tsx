@@ -88,6 +88,7 @@ const themeKey = 'post-bda-theme';
 const sidebarKey = 'post-bda-sidebar-w';
 const responseKey = 'post-bda-response-h';
 const syncCodeKey = 'post-bda-sync-code';
+const autoSyncKey = 'post-bda-autosync';
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const blankRow = (): KeyValue => ({ id: uid(), key: '', value: '', enabled: true });
@@ -180,17 +181,22 @@ export default function Home() {
   const [extractSource, setExtractSource] = useState<ExtractSource>('body');
   const [ruleMsgs, setRuleMsgs] = useState<Record<string, string>>({});
   const [syncCode, setSyncCode] = useState('');
+  const [autoSync, setAutoSync] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const [syncBusy, setSyncBusy] = useState(false);
   const loaded = useRef(false);
   const pendingEnvelope = useRef<Envelope | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
   const passphraseRef = useRef('');
+  const autoPushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoPulledRef = useRef(false);
+  const suppressPushRef = useRef(false);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem(themeKey);
     if (savedTheme) setTheme(savedTheme);
     setSyncCode(localStorage.getItem(syncCodeKey) ?? '');
+    setAutoSync(localStorage.getItem(autoSyncKey) === '1');
     const savedWidth = Number(localStorage.getItem(sidebarKey));
     if (savedWidth) setSidebarWidth(Math.min(560, Math.max(210, savedWidth)));
     const savedHeight = Number(localStorage.getItem(responseKey));
@@ -298,6 +304,32 @@ export default function Home() {
       localStorage.setItem(storageKey, JSON.stringify(toStore));
     }
   }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, cryptoKey, salt]);
+
+  // Automatic cloud sync: debounced push whenever the workspace changes.
+  useEffect(() => {
+    if (!loaded.current || !autoSync) return;
+    if (!syncCode.trim() || !cryptoKey || !salt) return;
+    if (suppressPushRef.current) {
+      suppressPushRef.current = false; // this change came from a pull — don't echo it back
+      return;
+    }
+    if (autoPushTimer.current) clearTimeout(autoPushTimer.current);
+    autoPushTimer.current = setTimeout(() => {
+      pushWorkspace(true);
+    }, 1500);
+    return () => {
+      if (autoPushTimer.current) clearTimeout(autoPushTimer.current);
+    };
+  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, autoSync, syncCode, cryptoKey, salt]);
+
+  // Automatic cloud sync: pull the latest cloud copy once on startup (after the
+  // passphrase is available), so a reload or another device picks up changes.
+  useEffect(() => {
+    if (!loaded.current || autoPulledRef.current || !autoSync) return;
+    if (!syncCode.trim() || !passphraseRef.current) return;
+    autoPulledRef.current = true;
+    autoPullWorkspace();
+  }, [autoSync, syncCode, cryptoKey, locked]);
 
   const active = requests.find((r) => r.id === activeId);
   const variableMap = useMemo(
@@ -693,12 +725,11 @@ export default function Home() {
     setSyncMsg('New sync code generated — save it to link other devices.');
   }
 
-  async function pushSync() {
+  // Core push used by both the manual button and automatic sync. Returns true
+  // on success. When silent, it avoids the chatty status messages.
+  async function pushWorkspace(silent: boolean): Promise<boolean> {
     const code = syncCode.trim();
-    if (!code) return setSyncMsg('Enter or generate a sync code first.');
-    if (!cryptoKey || !salt) return setSyncMsg('Set a passphrase first (the lock icon) — sync is end-to-end encrypted.');
-    setSyncBusy(true);
-    setSyncMsg('');
+    if (!code || !cryptoKey || !salt) return false;
     try {
       const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history };
       const envelope = await encryptWorkspace(cryptoKey, salt, sessionOnly ? redactSecrets(workspace) : workspace);
@@ -708,12 +739,42 @@ export default function Home() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id, blob: envelope }),
       });
-      if (res.ok) setSyncMsg('Pushed to cloud.');
-      else setSyncMsg(`Push failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
+      if (res.ok) setSyncMsg(silent ? 'Auto-synced ✓' : 'Pushed to cloud.');
+      else if (!silent) setSyncMsg(`Push failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
+      return res.ok;
     } catch (caught) {
-      setSyncMsg(caught instanceof Error ? caught.message : 'Push failed.');
-    } finally {
-      setSyncBusy(false);
+      if (!silent) setSyncMsg(caught instanceof Error ? caught.message : 'Push failed.');
+      return false;
+    }
+  }
+
+  async function pushSync() {
+    const code = syncCode.trim();
+    if (!code) return setSyncMsg('Enter or generate a sync code first.');
+    if (!cryptoKey || !salt) return setSyncMsg('Set a passphrase first (the lock icon) — sync is end-to-end encrypted.');
+    setSyncBusy(true);
+    setSyncMsg('');
+    await pushWorkspace(false);
+    setSyncBusy(false);
+  }
+
+  // Silent startup pull for automatic sync: load the cloud copy without a
+  // confirm prompt, and keep local data if there is nothing to pull.
+  async function autoPullWorkspace() {
+    const code = syncCode.trim();
+    if (!code || !passphraseRef.current) return;
+    try {
+      const id = await sha256hex(code);
+      const res = await fetch(`/api/sync?id=${id}`);
+      if (!res.ok) return; // 404 (nothing pushed yet) or transient — keep local
+      const { blob } = (await res.json()) as { blob: Envelope };
+      const key = await deriveKey(passphraseRef.current, fromB64(blob.salt));
+      const workspace = await decryptWorkspace(key, blob);
+      suppressPushRef.current = true; // don't immediately re-push what we just pulled
+      loadWorkspace(workspace);
+      setSyncMsg('Synced from cloud ✓');
+    } catch {
+      /* leave local workspace intact on any failure */
     }
   }
 
@@ -848,9 +909,26 @@ export default function Home() {
                       Pull
                     </button>
                   </div>
+                  <label className="menu-toggle">
+                    <input
+                      type="checkbox"
+                      checked={autoSync}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setAutoSync(on);
+                        localStorage.setItem(autoSyncKey, on ? '1' : '0');
+                        autoPulledRef.current = false; // allow a fresh pull when turning it on
+                        if (on && (!syncCode.trim() || !cryptoKey)) {
+                          setSyncMsg('Set a sync code and passphrase to finish enabling automatic sync.');
+                        }
+                      }}
+                    />
+                    <span>Automatic sync</span>
+                  </label>
                   <p className="menu-note">
                     End-to-end encrypted with your passphrase — set the lock first. Use the same sync code and passphrase on
-                    each device.
+                    each device. With <b>Automatic sync</b> on, changes push to the cloud shortly after you make them and
+                    pull on load.
                   </p>
                   {syncMsg && <p className="menu-note sync-msg">{syncMsg}</p>}
                 </div>
