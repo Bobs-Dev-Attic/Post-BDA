@@ -1189,41 +1189,43 @@ export default function Home() {
                 </div>
               )}
 
-              {response &&
-                (respView === 'headers' ? (
-                  <div className="header-table">
-                    {response.headers.map((h) => (
-                      <div className="header-row" key={h.id}>
-                        <span className="h-key">{h.key}</span>
-                        <span className="h-val">{h.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : respView === 'preview' ? (
-                  <iframe className="preview-frame" title="Response preview" sandbox="" srcDoc={response.body} />
-                ) : respView === 'raw' ? (
-                  <pre className="response-body">{response.body}</pre>
-                ) : response.isJson ? (
-                  extractOpen ? (
-                    <ExtractTree
-                      body={response.body}
-                      pretty={response.pretty}
-                      selected={extractPath.trim()}
-                      onPick={(p) => {
-                        setExtractPath(p);
-                        setExtractMsg('');
-                      }}
-                    />
+              <div className="response-scroll">
+                {response &&
+                  (respView === 'headers' ? (
+                    <div className="header-table">
+                      {response.headers.map((h) => (
+                        <div className="header-row" key={h.id}>
+                          <span className="h-key">{h.key}</span>
+                          <span className="h-val">{h.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : respView === 'preview' ? (
+                    <iframe className="preview-frame" title="Response preview" sandbox="" srcDoc={response.body} />
+                  ) : respView === 'raw' ? (
+                    <pre className="response-body">{response.body}</pre>
+                  ) : response.isJson ? (
+                    extractOpen ? (
+                      <ExtractTree
+                        body={response.body}
+                        pretty={response.pretty}
+                        selected={extractPath.trim()}
+                        onPick={(p) => {
+                          setExtractPath(p);
+                          setExtractMsg('');
+                        }}
+                      />
+                    ) : (
+                      <pre className="response-body json" dangerouslySetInnerHTML={{ __html: highlightJson(response.pretty) }} />
+                    )
                   ) : (
-                    <pre className="response-body json" dangerouslySetInnerHTML={{ __html: highlightJson(response.pretty) }} />
-                  )
-                ) : (
-                  <pre className="response-body">{response.pretty}</pre>
-                ))}
+                    <pre className="response-body">{response.pretty}</pre>
+                  ))}
 
-              {!response && !error && (
-                <p className="empty">Send a request to inspect status, headers, timing, and body.</p>
-              )}
+                {!response && !error && (
+                  <p className="empty">Send a request to inspect status, headers, timing, and body.</p>
+                )}
+              </div>
             </div>
           </div>
         ) : (

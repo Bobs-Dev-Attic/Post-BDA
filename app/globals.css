@@ -503,7 +503,28 @@ pre {
   touch-action: none;
 }
 .h-resizer:hover, .h-resizer:active { background: var(--accent); }
-.response { flex: 0 0 auto; height: var(--response-h, 40vh); min-height: 120px; overflow: auto; padding: 1rem 1.25rem 1.5rem; display: grid; gap: .7rem; align-content: start; }
+.response {
+  flex: 0 0 auto;
+  height: var(--response-h, 40vh);
+  min-height: 120px;
+  overflow: hidden; /* the header/toolbar stay put; the body scrolls on its own */
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: .7rem;
+}
+/* pinned header + toolbar never shrink; only the body region flexes */
+.response > .response-head,
+.response > .error,
+.response > .response-toolbar,
+.response > .extract { flex: 0 0 auto; }
+.response-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--line-soft);
+  padding-top: .7rem;
+}
 .response pre, .response .response-body, .response .header-table { max-height: none; }
 .response-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .response-head h2 { margin: 0; font-size: .95rem; }
