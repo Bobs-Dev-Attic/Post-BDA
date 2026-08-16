@@ -492,6 +492,15 @@ pre {
 }
 .add-row:hover { text-decoration: underline; }
 
+/* auto-extract rules editor */
+.rules { display: grid; gap: .55rem; }
+.rule-row { display: grid; grid-template-columns: 28px 1.6fr 16px 1fr 30px; gap: .45rem; align-items: center; }
+.rule-row input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--accent); justify-self: center; }
+.rule-arrow { color: var(--muted); text-align: center; font-weight: 700; }
+.rule-var { font-family: "SFMono-Regular", Consolas, ui-monospace, monospace; }
+.extract-rule { padding: .5rem .9rem; white-space: nowrap; }
+.auto-extract-note { margin: 0; color: var(--accent); font-size: .78rem; font-weight: 600; }
+
 /* response — resizable, independently scrollable region */
 .h-resizer {
   height: 6px;
@@ -517,7 +526,8 @@ pre {
 .response > .response-head,
 .response > .error,
 .response > .response-toolbar,
-.response > .extract { flex: 0 0 auto; }
+.response > .extract,
+.response > .auto-extract-note { flex: 0 0 auto; }
 .response-scroll {
   flex: 1 1 auto;
   min-height: 0;

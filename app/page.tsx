@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type KeyValue = { id: string; key: string; value: string; enabled: boolean; secret?: boolean };
+type ExtractRule = { id: string; path: string; variable: string; enabled: boolean };
 type RequestConfig = {
   id: string;
   name: string;
@@ -12,6 +13,7 @@ type RequestConfig = {
   headers: KeyValue[];
   body: string;
   auth: Auth;
+  extractRules?: ExtractRule[];
   createdAt: string;
   updatedAt: string;
 };
@@ -37,7 +39,7 @@ type ResponseState = {
   isJson: boolean;
   contentType: string;
 };
-type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables';
+type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables' | 'extract';
 type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
 type RequestSnapshot = Pick<RequestConfig, 'method' | 'url' | 'params' | 'headers' | 'body' | 'auth'>;
 type HistoryEntry = {
@@ -120,6 +122,7 @@ function makeRequest(patch: Partial<RequestConfig> = {}): RequestConfig {
     headers: [{ id: uid(), key: 'Accept', value: 'application/json', enabled: true }],
     body: '',
     auth: defaultAuth(),
+    extractRules: [],
     createdAt: now(),
     updatedAt: now(),
     ...patch,
@@ -173,6 +176,7 @@ export default function Home() {
   const [extractPath, setExtractPath] = useState('');
   const [extractName, setExtractName] = useState('');
   const [extractMsg, setExtractMsg] = useState('');
+  const [ruleMsgs, setRuleMsgs] = useState<Record<string, string>>({});
   const [syncCode, setSyncCode] = useState('');
   const [syncMsg, setSyncMsg] = useState('');
   const [syncBusy, setSyncBusy] = useState(false);
@@ -442,6 +446,48 @@ export default function Home() {
     });
   }
 
+  // Run a request's saved extraction rules against a fresh JSON body and write
+  // each resolved value into the matching variable. Returns a status summary.
+  function applyExtractRules(req: RequestConfig, body: string): string {
+    const rules = (req.extractRules ?? []).filter((r) => r.enabled && r.variable.trim());
+    if (!rules.length) return '';
+    let data: unknown;
+    try {
+      data = JSON.parse(body);
+    } catch {
+      return 'Auto-extract skipped — response is not JSON.';
+    }
+    const done: string[] = [];
+    const missed: string[] = [];
+    for (const rule of rules) {
+      const val = rule.path.trim() ? resolvePath(data, rule.path.trim()) : data;
+      if (val === undefined) {
+        missed.push(rule.variable.trim());
+        continue;
+      }
+      setVariable(rule.variable.trim(), typeof val === 'object' ? JSON.stringify(val) : String(val));
+      done.push(rule.variable.trim());
+    }
+    const parts: string[] = [];
+    if (done.length) parts.push(`Set ${done.map((n) => `{{${n}}}`).join(', ')}`);
+    if (missed.length) parts.push(`No match for ${missed.map((n) => `{{${n}}}`).join(', ')}`);
+    return parts.join(' · ');
+  }
+
+  function addRuleFromExtract() {
+    if (!active) return;
+    const name = extractName.trim();
+    if (!name) {
+      setExtractMsg('Enter a variable name to save a rule.');
+      return;
+    }
+    const rules = active.extractRules ?? [];
+    updateActive({
+      extractRules: [...rules, { id: uid(), path: extractPath.trim(), variable: name, enabled: true }],
+    });
+    setExtractMsg(`Auto-extract rule added: ${extractPath.trim() || '(whole body)'} → {{${name}}}`);
+  }
+
   function extractToVariable() {
     if (!response) return;
     const name = extractName.trim();
@@ -551,6 +597,7 @@ export default function Home() {
           contentType: result.headers.get('content-type') ?? '',
         },
       }));
+      setRuleMsgs((m) => ({ ...m, [id]: applyExtractRules(req, body) }));
       pushHistory({
         id: uid(),
         requestId: id,
@@ -1054,7 +1101,7 @@ export default function Home() {
             </form>
 
             <div className="editor-tabs">
-              {(['params', 'auth', 'headers', 'body', 'variables'] as EditorTab[]).map((tab) => (
+              {(['params', 'auth', 'headers', 'body', 'variables', 'extract'] as EditorTab[]).map((tab) => (
                 <button
                   key={tab}
                   className={editorTab === tab ? 'etab active' : 'etab'}
@@ -1068,10 +1115,15 @@ export default function Home() {
                         ? 'Headers'
                         : tab === 'body'
                           ? 'Body'
-                          : 'Variables'}
+                          : tab === 'variables'
+                            ? 'Variables'
+                            : 'Auto-extract'}
                   {tab === 'params' && countRows(active.params) > 0 && <b className="count">{countRows(active.params)}</b>}
                   {tab === 'auth' && active.auth.type !== 'none' && <b className="dot" aria-hidden />}
                   {tab === 'headers' && countRows(active.headers) > 0 && <b className="count">{countRows(active.headers)}</b>}
+                  {tab === 'extract' && (active.extractRules ?? []).some((r) => r.enabled && r.variable.trim()) && (
+                    <b className="count">{(active.extractRules ?? []).filter((r) => r.enabled && r.variable.trim()).length}</b>
+                  )}
                 </button>
               ))}
             </div>
@@ -1109,6 +1161,79 @@ export default function Home() {
                   onChange={(id, patch) => setVariables((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)))}
                   onRemove={(id) => setVariables((rows) => rows.filter((r) => r.id !== id))}
                 />
+              )}
+              {editorTab === 'extract' && (
+                <div className="rules">
+                  <p className="auth-hint">
+                    After every response, each enabled rule reads a path from the JSON body and writes it into the named
+                    variable — so a login token can refresh itself with no clicks. Tip: open <b>Extract → var</b> on a
+                    response and use <b>Save as rule</b> to add one by clicking.
+                  </p>
+                  {(active.extractRules ?? []).map((rule) => (
+                    <div className="rule-row" key={rule.id}>
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        aria-label="Enable rule"
+                        onChange={(e) =>
+                          updateActive({
+                            extractRules: (active.extractRules ?? []).map((r) =>
+                              r.id === rule.id ? { ...r, enabled: e.target.checked } : r,
+                            ),
+                          })
+                        }
+                      />
+                      <input
+                        className="rule-path"
+                        value={rule.path}
+                        placeholder="Path e.g. data.token (blank = whole body)"
+                        spellCheck={false}
+                        onChange={(e) =>
+                          updateActive({
+                            extractRules: (active.extractRules ?? []).map((r) =>
+                              r.id === rule.id ? { ...r, path: e.target.value } : r,
+                            ),
+                          })
+                        }
+                      />
+                      <span className="rule-arrow" aria-hidden>
+                        →
+                      </span>
+                      <input
+                        className="rule-var"
+                        value={rule.variable}
+                        placeholder="variable"
+                        spellCheck={false}
+                        onChange={(e) =>
+                          updateActive({
+                            extractRules: (active.extractRules ?? []).map((r) =>
+                              r.id === rule.id ? { ...r, variable: e.target.value } : r,
+                            ),
+                          })
+                        }
+                      />
+                      <button
+                        className="row-del"
+                        aria-label="Delete rule"
+                        onClick={() =>
+                          updateActive({ extractRules: (active.extractRules ?? []).filter((r) => r.id !== rule.id) })
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="add-row"
+                    onClick={() =>
+                      updateActive({
+                        extractRules: [...(active.extractRules ?? []), { id: uid(), path: '', variable: '', enabled: true }],
+                      })
+                    }
+                  >
+                    + Add rule
+                  </button>
+                </div>
               )}
             </div>
             </div>
@@ -1185,8 +1310,15 @@ export default function Home() {
                   <button className="send extract-save" type="button" onClick={extractToVariable}>
                     Save
                   </button>
+                  <button className="btn-ghost extract-rule" type="button" onClick={addRuleFromExtract}>
+                    Save as rule
+                  </button>
                   {extractMsg && <span className="extract-msg">{extractMsg}</span>}
                 </div>
+              )}
+
+              {response && active && ruleMsgs[active.id] && (
+                <p className="auto-extract-note">⚡ {ruleMsgs[active.id]}</p>
               )}
 
               <div className="response-scroll">
