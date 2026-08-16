@@ -492,6 +492,50 @@ pre {
 }
 .add-row:hover { text-decoration: underline; }
 
+/* sequence runner modal */
+.runner-card {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  gap: .8rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.4rem;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+}
+.runner-head { display: flex; align-items: center; justify-content: space-between; }
+.runner-head h2 { margin: 0; font-size: 1.15rem; }
+.runner-steps { display: grid; gap: .35rem; }
+.runner-step {
+  display: grid;
+  grid-template-columns: 20px 20px 44px 1fr auto auto;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .55rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: var(--input-bg);
+}
+.runner-step.off { opacity: .5; }
+.runner-step.running { box-shadow: inset 2px 0 0 var(--accent); }
+.runner-step.ok { box-shadow: inset 2px 0 0 var(--m-get); }
+.runner-step.fail { box-shadow: inset 2px 0 0 var(--danger); }
+.runner-step input[type='checkbox'] { width: 15px; height: 15px; accent-color: var(--accent); justify-self: center; }
+.runner-idx { color: var(--muted); font-size: .78rem; text-align: center; }
+.runner-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runner-state { display: flex; align-items: center; gap: .5rem; font-size: .78rem; color: var(--muted); justify-content: flex-end; }
+.runner-state .ok { color: var(--m-get); font-weight: 800; }
+.runner-state .bad { color: var(--danger); font-weight: 800; }
+.runner-spin { color: var(--accent); font-weight: 600; }
+.runner-note { color: var(--accent); font-weight: 600; }
+.runner-move { display: inline-flex; gap: .1rem; }
+.runner-move .icon-btn:disabled { opacity: .3; cursor: default; }
+.runner-actions { display: flex; justify-content: flex-end; gap: .5rem; }
+.runner-actions .send { padding: .55rem 1.3rem; }
+
 /* auto-extract rules editor */
 .rules { display: grid; gap: .7rem; }
 .rule-row { display: grid; gap: .3rem; }
