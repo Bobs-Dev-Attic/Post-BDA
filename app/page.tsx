@@ -50,6 +50,7 @@ type ExecOutcome = {
   body: string;
 };
 type RunnerStepStatus = { state: 'pending' | 'waiting' | 'running' | 'ok' | 'fail'; status?: number; ms?: number; note?: string };
+type RunnerSummary = { total: number; passed: number; failed: number; skipped: number; requestMs: number; wallMs: number };
 type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables' | 'extract';
 type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
 type RequestSnapshot = Pick<RequestConfig, 'method' | 'url' | 'params' | 'headers' | 'body' | 'auth'>;
@@ -213,6 +214,7 @@ export default function Home() {
   const [runnerBusy, setRunnerBusy] = useState(false);
   const [runnerStopOnError, setRunnerStopOnError] = useState(true);
   const [runnerDelayMs, setRunnerDelayMs] = useState(0);
+  const [runnerSummary, setRunnerSummary] = useState<RunnerSummary | null>(null);
   const [runnerTitle, setRunnerTitle] = useState('Run in order');
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
@@ -790,12 +792,18 @@ export default function Home() {
   // single run would, plus per-step runner status.
   async function runSequence(steps: RequestConfig[]) {
     setRunnerBusy(true);
+    setRunnerSummary(null);
     // Values extracted during this run, threaded into later steps on top of each
     // step's own collection variables (so cross-collection runbooks still chain).
     const threaded: Record<string, string> = {};
     const results: Record<string, RunnerStepStatus> = {};
     steps.forEach((s) => (results[s.id] = { state: 'pending' }));
     setRunnerStatus({ ...results });
+    const wallStart = performance.now();
+    let passed = 0;
+    let failed = 0;
+    let ran = 0;
+    let requestMs = 0;
     for (let i = 0; i < steps.length; i++) {
       const req = steps[i];
       if (i > 0 && runnerDelayMs > 0) {
@@ -816,6 +824,9 @@ export default function Home() {
         });
         results[req.id] = { state: 'fail', note: exec.error };
         setRunnerStatus({ ...results });
+        ran += 1;
+        failed += 1;
+        requestMs += exec.durationMs;
         if (runnerStopOnError) break;
         continue;
       }
@@ -838,8 +849,20 @@ export default function Home() {
         note: Object.keys(updates).length ? `→ ${Object.keys(updates).map((k) => `{{${k}}}`).join(', ')}` : undefined,
       };
       setRunnerStatus({ ...results });
+      ran += 1;
+      requestMs += exec.durationMs;
+      if (exec.status < 400) passed += 1;
+      else failed += 1;
       if (exec.status >= 400 && runnerStopOnError) break;
     }
+    setRunnerSummary({
+      total: steps.length,
+      passed,
+      failed,
+      skipped: steps.length - ran,
+      requestMs,
+      wallMs: Math.round(performance.now() - wallStart),
+    });
     setRunnerBusy(false);
   }
 
@@ -848,6 +871,7 @@ export default function Home() {
     setRunnerTitle(title);
     setRunnerDisabled({});
     setRunnerStatus({});
+    setRunnerSummary(null);
     setRunnerOpen(true);
     setMenu('');
     setDrawerOpen(false);
@@ -1214,6 +1238,23 @@ export default function Home() {
               />
               <span className="runner-delay-unit">ms</span>
             </label>
+            {runnerSummary && (
+              <div className={`runner-summary ${runnerSummary.failed ? 'has-fail' : 'all-pass'}`}>
+                <span className="rs-headline">
+                  {runnerSummary.failed ? '⚠ Completed with failures' : '✓ All steps passed'}
+                </span>
+                <span className="rs-stats">
+                  <b className="ok">{runnerSummary.passed} passed</b>
+                  {runnerSummary.failed > 0 && <b className="bad">{runnerSummary.failed} failed</b>}
+                  {runnerSummary.skipped > 0 && <span className="rs-skip">{runnerSummary.skipped} skipped</span>}
+                  <span className="rs-sep">·</span>
+                  <span title="Total wall-clock time including delays">{formatMs(runnerSummary.wallMs)} total</span>
+                  <span className="rs-req" title="Sum of request round-trip times">
+                    ({formatMs(runnerSummary.requestMs)} in requests)
+                  </span>
+                </span>
+              </div>
+            )}
             <div className="runner-actions">
               <button className="btn-ghost" onClick={() => !runnerBusy && setRunnerOpen(false)}>
                 Close
@@ -2596,6 +2637,14 @@ function JsonTree({
       </span>
     </div>
   );
+}
+
+function formatMs(ms: number) {
+  if (ms < 1000) return `${ms} ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)} s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${Math.round(s - m * 60)}s`;
 }
 
 function formatBytes(bytes: number) {
