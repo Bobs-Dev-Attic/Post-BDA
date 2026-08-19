@@ -28,7 +28,7 @@ type Auth = {
   value: string;
   addTo: 'header' | 'query';
 };
-type Collection = { id: string; name: string; requestIds: string[] };
+type Collection = { id: string; name: string; requestIds: string[]; variables?: KeyValue[] };
 type ResponseState = {
   status: number;
   statusText: string;
@@ -71,7 +71,7 @@ type Runbook = { id: string; name: string; stepIds: string[] };
 type WorkspaceData = {
   collections: Collection[];
   requests: RequestConfig[];
-  variables: KeyValue[];
+  variables?: KeyValue[]; // legacy global variables — migrated onto collections on load
   openTabs: string[];
   activeId: string;
   expanded: Record<string, boolean>;
@@ -131,7 +131,10 @@ function redactSecrets(ws: WorkspaceData): WorkspaceData {
   return {
     ...ws,
     requests: ws.requests.map(blankAuth),
-    variables: ws.variables.map((v) => (v.secret ? { ...v, value: '' } : v)),
+    collections: ws.collections.map((c) => ({
+      ...c,
+      variables: (c.variables ?? []).map((v) => (v.secret ? { ...v, value: '' } : v)),
+    })),
     history: ws.history.map((h) => ({ ...h, snapshot: blankAuth(h.snapshot) })),
   };
 }
@@ -165,7 +168,14 @@ function seed(): { collections: Collection[]; requests: RequestConfig[] } {
     body: '{\n  "title": "{{team}}",\n  "body": "hello"\n}',
   });
   return {
-    collections: [{ id: uid(), name: 'My Collection', requestIds: [sample.id, post.id] }],
+    collections: [
+      {
+        id: uid(),
+        name: 'My Collection',
+        requestIds: [sample.id, post.id],
+        variables: [{ id: uid(), key: 'team', value: 'platform', enabled: true }],
+      },
+    ],
     requests: [sample, post],
   };
 }
@@ -176,7 +186,6 @@ export default function Home() {
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [activeId, setActiveId] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [variables, setVariables] = useState<KeyValue[]>([{ id: 'team-var', key: 'team', value: 'platform', enabled: true }]);
   const [responses, setResponses] = useState<Record<string, ResponseState>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [sending, setSending] = useState<Record<string, boolean>>({});
@@ -283,11 +292,15 @@ export default function Home() {
   }, [theme]);
 
   function loadWorkspace(parsed: WorkspaceData) {
-    const cols: Collection[] = parsed.collections ?? [];
+    const legacy = parsed.variables ?? [];
+    const cols: Collection[] = (parsed.collections ?? []).map((c) => ({
+      ...c,
+      // migrate legacy global variables into each collection that lacks its own
+      variables: c.variables ?? legacy.map((v) => ({ ...v, id: uid() })),
+    }));
     const reqs: RequestConfig[] = (parsed.requests ?? []).map(normalizeRequest);
     setCollections(cols);
     setRequests(reqs);
-    setVariables(parsed.variables ?? []);
     setExpanded(parsed.expanded ?? Object.fromEntries(cols.map((c) => [c.id, true])));
     const tabs: string[] = (parsed.openTabs ?? []).filter((id: string) => reqs.some((r) => r.id === id));
     const initialTabs = tabs.length ? tabs : reqs.slice(0, 1).map((r) => r.id);
@@ -326,7 +339,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!loaded.current) return;
-    const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks };
+    const workspace: WorkspaceData = { collections, requests, openTabs, activeId, expanded, sessionOnly, history, runbooks };
     const toStore = sessionOnly ? redactSecrets(workspace) : workspace;
     if (cryptoKey && salt) {
       encryptWorkspace(cryptoKey, salt, toStore)
@@ -335,7 +348,7 @@ export default function Home() {
     } else {
       localStorage.setItem(storageKey, JSON.stringify(toStore));
     }
-  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks, cryptoKey, salt]);
+  }, [collections, requests, openTabs, activeId, expanded, sessionOnly, history, runbooks, cryptoKey, salt]);
 
   // Automatic cloud sync: debounced push whenever the workspace changes.
   useEffect(() => {
@@ -352,7 +365,7 @@ export default function Home() {
     return () => {
       if (autoPushTimer.current) clearTimeout(autoPushTimer.current);
     };
-  }, [collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks, autoSync, syncCode, cryptoKey, salt]);
+  }, [collections, requests, openTabs, activeId, expanded, sessionOnly, history, runbooks, autoSync, syncCode, cryptoKey, salt]);
 
   // Automatic cloud sync: pull the latest cloud copy once on startup (after the
   // passphrase is available), so a reload or another device picks up changes.
@@ -364,14 +377,39 @@ export default function Home() {
   }, [autoSync, syncCode, cryptoKey, locked]);
 
   const active = requests.find((r) => r.id === activeId);
+  // Variables are scoped to a collection. The active request's collection (or the
+  // first collection, for loose requests) supplies the variables shown and used.
+  const activeCollection = collections.find((c) => active && c.requestIds.includes(active.id)) ?? collections[0];
+  const activeVariables = activeCollection?.variables ?? [];
   const variableMap = useMemo(
-    () => Object.fromEntries(variables.filter((v) => v.enabled && v.key).map((v) => [v.key, v.value])),
-    [variables],
+    () => Object.fromEntries(activeVariables.filter((v) => v.enabled && v.key).map((v) => [v.key, v.value])),
+    [activeVariables],
   );
   const hydratedUrl = useMemo(() => (active ? computeUrl(active, variableMap) : ''), [active, variableMap]);
 
   function requestById(id: string) {
     return requests.find((r) => r.id === id);
+  }
+
+  // Resolve the collection a request belongs to (falling back to the first), and
+  // its variable map. Used so each request/step resolves against its own scope.
+  function collectionIdOf(reqId: string): string {
+    return (collections.find((c) => c.requestIds.includes(reqId)) ?? collections[0])?.id ?? '';
+  }
+  function varsForRequest(reqId: string): Record<string, string> {
+    const col = collections.find((c) => c.requestIds.includes(reqId)) ?? collections[0];
+    return Object.fromEntries((col?.variables ?? []).filter((v) => v.enabled && v.key).map((v) => [v.key, v.value]));
+  }
+  function updateCollectionVars(collectionId: string, fn: (vars: KeyValue[]) => KeyValue[]) {
+    setCollections((cols) => cols.map((c) => (c.id === collectionId ? { ...c, variables: fn(c.variables ?? []) } : c)));
+  }
+  function setVariableIn(collectionId: string, name: string, value: string) {
+    if (!collectionId) return;
+    updateCollectionVars(collectionId, (vars) =>
+      vars.some((r) => r.key === name)
+        ? vars.map((r) => (r.key === name ? { ...r, value } : r))
+        : [...vars, { id: uid(), key: name, value, enabled: true }],
+    );
   }
 
   function updateRequest(id: string, patch: Partial<RequestConfig>) {
@@ -462,7 +500,7 @@ export default function Home() {
       app: 'post-bda',
       version: 1,
       exportedAt: new Date().toISOString(),
-      workspace: { collections, requests, variables, history, runbooks },
+      workspace: { collections, requests, history, runbooks },
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -483,13 +521,16 @@ export default function Home() {
       try {
         const parsed = JSON.parse(String(reader.result));
         const ws = parsed.workspace ?? parsed;
-        const cols: Collection[] = ws.collections ?? [];
+        const legacy = ws.variables ?? [];
+        const cols: Collection[] = (ws.collections ?? []).map((c: Collection) => ({
+          ...c,
+          variables: c.variables ?? legacy.map((v: KeyValue) => ({ ...v, id: uid() })),
+        }));
         const reqs: RequestConfig[] = (ws.requests ?? []).map(normalizeRequest);
         if (!cols.length && !reqs.length) throw new Error('empty');
         if (!window.confirm('Import will replace your current workspace. Continue?')) return;
         setCollections(cols);
         setRequests(reqs);
-        setVariables(ws.variables ?? []);
         setHistory(ws.history ?? []);
         setRunbooks(ws.runbooks ?? []);
         setExpanded(Object.fromEntries(cols.map((c) => [c.id, true])));
@@ -504,13 +545,9 @@ export default function Home() {
     setMenu('');
   }
 
+  // Write a variable into the active request's collection (manual Extract → var).
   function setVariable(name: string, value: string) {
-    setVariables((rows) => {
-      if (rows.some((r) => r.key === name)) {
-        return rows.map((r) => (r.key === name ? { ...r, value } : r));
-      }
-      return [...rows, { id: uid(), key: name, value, enabled: true }];
-    });
+    if (activeCollection) setVariableIn(activeCollection.id, name, value);
   }
 
   // Run a request's saved extraction rules against a fresh response. Pure: it
@@ -716,7 +753,7 @@ export default function Home() {
       return next;
     });
     try {
-      const exec = await executeRequest(req, variableMap);
+      const exec = await executeRequest(req, varsForRequest(id));
       if (exec.error || !exec.responseState) {
         setErrors((e) => ({ ...e, [id]: exec.error ?? 'Request failed' }));
         pushHistory({
@@ -728,7 +765,8 @@ export default function Home() {
       setRespView('pretty');
       setResponses((r) => ({ ...r, [id]: exec.responseState! }));
       const { updates, note } = computeExtracted(req, exec.body, exec.headers!);
-      Object.entries(updates).forEach(([k, v]) => setVariable(k, v));
+      const colId = collectionIdOf(id);
+      Object.entries(updates).forEach(([k, v]) => setVariableIn(colId, k, v));
       setRuleMsgs((m) => ({ ...m, [id]: note }));
       pushHistory({
         id: uid(), requestId: id, name: req.name, method: req.method, url: exec.url,
@@ -744,7 +782,9 @@ export default function Home() {
   // single run would, plus per-step runner status.
   async function runSequence(steps: RequestConfig[]) {
     setRunnerBusy(true);
-    let vars = { ...variableMap };
+    // Values extracted during this run, threaded into later steps on top of each
+    // step's own collection variables (so cross-collection runbooks still chain).
+    const threaded: Record<string, string> = {};
     const results: Record<string, RunnerStepStatus> = {};
     steps.forEach((s) => (results[s.id] = { state: 'pending' }));
     setRunnerStatus({ ...results });
@@ -753,7 +793,7 @@ export default function Home() {
       setRunnerStatus({ ...results });
       setActiveId(req.id);
       setOpenTabs((tabs) => (tabs.includes(req.id) ? tabs : [...tabs, req.id]));
-      const exec = await executeRequest(req, vars);
+      const exec = await executeRequest(req, { ...varsForRequest(req.id), ...threaded });
       if (exec.error || !exec.responseState) {
         setErrors((e) => ({ ...e, [req.id]: exec.error ?? 'Request failed' }));
         pushHistory({
@@ -769,8 +809,9 @@ export default function Home() {
       setResponses((r) => ({ ...r, [req.id]: exec.responseState! }));
       setErrors((e) => ({ ...e, [req.id]: '' }));
       const { updates, note } = computeExtracted(req, exec.body, exec.headers!);
-      Object.entries(updates).forEach(([k, v]) => setVariable(k, v));
-      vars = { ...vars, ...updates }; // thread into the next step immediately
+      const colId = collectionIdOf(req.id);
+      Object.entries(updates).forEach(([k, v]) => setVariableIn(colId, k, v)); // persist to the step's collection
+      Object.assign(threaded, updates); // and thread into later steps
       setRuleMsgs((m) => ({ ...m, [req.id]: note }));
       pushHistory({
         id: uid(), requestId: req.id, name: req.name, method: req.method, url: exec.url,
@@ -899,7 +940,7 @@ export default function Home() {
     const code = syncCode.trim();
     if (!code || !cryptoKey || !salt) return false;
     try {
-      const workspace: WorkspaceData = { collections, requests, variables, openTabs, activeId, expanded, sessionOnly, history, runbooks };
+      const workspace: WorkspaceData = { collections, requests, openTabs, activeId, expanded, sessionOnly, history, runbooks };
       const envelope = await encryptWorkspace(cryptoKey, salt, sessionOnly ? redactSecrets(workspace) : workspace);
       const id = await sha256hex(code);
       const res = await fetch('/api/sync', {
@@ -1630,7 +1671,7 @@ export default function Home() {
                   {tab === 'params' && countRows(active.params) > 0 && <b className="count">{countRows(active.params)}</b>}
                   {tab === 'auth' && active.auth.type !== 'none' && <b className="dot" aria-hidden />}
                   {tab === 'headers' && countRows(active.headers) > 0 && <b className="count">{countRows(active.headers)}</b>}
-                  {tab === 'variables' && countRows(variables) > 0 && <b className="count">{countRows(variables)}</b>}
+                  {tab === 'variables' && countRows(activeVariables) > 0 && <b className="count">{countRows(activeVariables)}</b>}
                   {tab === 'extract' && (active.extractRules ?? []).some((r) => r.enabled && r.variable.trim()) && (
                     <b className="count">{(active.extractRules ?? []).filter((r) => r.enabled && r.variable.trim()).length}</b>
                   )}
@@ -1663,15 +1704,28 @@ export default function Home() {
                   placeholder='{"name":"{{userName}}"}'
                 />
               )}
-              {editorTab === 'variables' && (
-                <Rows
-                  rows={variables}
-                  secretable
-                  onAdd={() => setVariables((rows) => [...rows, blankRow()])}
-                  onChange={(id, patch) => setVariables((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)))}
-                  onRemove={(id) => setVariables((rows) => rows.filter((r) => r.id !== id))}
-                />
-              )}
+              {editorTab === 'variables' &&
+                (activeCollection ? (
+                  <>
+                    <p className="auth-hint">
+                      Variables are scoped to the <b>{activeCollection.name}</b> collection — each collection keeps its
+                      own set, and extraction writes here.
+                    </p>
+                    <Rows
+                      rows={activeVariables}
+                      secretable
+                      onAdd={() => updateCollectionVars(activeCollection.id, (rows) => [...rows, blankRow()])}
+                      onChange={(id, patch) =>
+                        updateCollectionVars(activeCollection.id, (rows) =>
+                          rows.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+                        )
+                      }
+                      onRemove={(id) => updateCollectionVars(activeCollection.id, (rows) => rows.filter((r) => r.id !== id))}
+                    />
+                  </>
+                ) : (
+                  <p className="auth-hint">Create a collection to add variables.</p>
+                ))}
               {editorTab === 'extract' && (
                 <div className="rules">
                   <p className="auth-hint">
