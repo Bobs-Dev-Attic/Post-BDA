@@ -106,6 +106,83 @@ const themes: Theme[] = [
   { id: 'lowlight', name: 'Low light', swatch: '#12100b' },
   { id: 'monotone', name: 'Monotone', swatch: '#101215' },
 ];
+// Starter templates for popular services. Secrets are placeholders ({{...}}),
+// never real credentials — the user fills them into the created collection.
+type ServiceTemplate = {
+  id: string;
+  name: string;
+  blurb: string;
+  variables: { key: string; value: string; secret?: boolean }[];
+  requests: { name: string; method: string; url: string; headers?: [string, string][]; body?: string; auth?: Partial<Auth> }[];
+};
+const jsonHeaders: [string, string][] = [['Content-Type', 'application/json'], ['Accept', 'application/json']];
+const serviceTemplates: ServiceTemplate[] = [
+  {
+    id: 'httpbin',
+    name: 'HTTPBin (testing)',
+    blurb: 'A sandbox API for trying requests — no credentials needed.',
+    variables: [],
+    requests: [
+      { name: 'GET anything', method: 'GET', url: 'https://httpbin.org/get?hello={{$guid}}' },
+      { name: 'POST anything', method: 'POST', url: 'https://httpbin.org/post', headers: jsonHeaders, body: '{\n  "sent_at": "{{$isoTimestamp}}"\n}' },
+    ],
+  },
+  {
+    id: 'github',
+    name: 'GitHub API',
+    blurb: 'REST API v3. Create a personal access token and paste it into {{token}}.',
+    variables: [{ key: 'token', value: '', secret: true }],
+    requests: [
+      { name: 'Authenticated user', method: 'GET', url: 'https://api.github.com/user', auth: { type: 'bearer', token: '{{token}}' } },
+      { name: 'List my repos', method: 'GET', url: 'https://api.github.com/user/repos?per_page=20', auth: { type: 'bearer', token: '{{token}}' } },
+    ],
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI API',
+    blurb: 'Chat Completions. Paste your API key into {{apiKey}}.',
+    variables: [{ key: 'apiKey', value: '', secret: true }],
+    requests: [
+      {
+        name: 'Chat completion',
+        method: 'POST',
+        url: 'https://api.openai.com/v1/chat/completions',
+        headers: jsonHeaders,
+        body: '{\n  "model": "gpt-4o-mini",\n  "messages": [{ "role": "user", "content": "Hello!" }]\n}',
+        auth: { type: 'bearer', token: '{{apiKey}}' },
+      },
+    ],
+  },
+  {
+    id: 'stripe',
+    name: 'Stripe API',
+    blurb: 'Paste a secret key into {{secretKey}} (used as Bearer auth).',
+    variables: [{ key: 'secretKey', value: '', secret: true }],
+    requests: [
+      { name: 'List customers', method: 'GET', url: 'https://api.stripe.com/v1/customers?limit=10', auth: { type: 'bearer', token: '{{secretKey}}' } },
+    ],
+  },
+  {
+    id: 'slack',
+    name: 'Slack API',
+    blurb: 'Post a message. Set {{token}} (bot token) and {{channel}}.',
+    variables: [
+      { key: 'token', value: '', secret: true },
+      { key: 'channel', value: '', secret: false },
+    ],
+    requests: [
+      {
+        name: 'Post message',
+        method: 'POST',
+        url: 'https://slack.com/api/chat.postMessage',
+        headers: jsonHeaders,
+        body: '{\n  "channel": "{{channel}}",\n  "text": "Hello from Post-BDA"\n}',
+        auth: { type: 'bearer', token: '{{token}}' },
+      },
+    ],
+  },
+];
+
 const storageKey = 'post-bda-workspace-v2';
 const themeKey = 'post-bda-theme';
 const sidebarKey = 'post-bda-sidebar-w';
@@ -204,6 +281,7 @@ export default function Home() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [curlOpen, setCurlOpen] = useState(false);
   const [curlTarget, setCurlTarget] = useState('');
   const [curlText, setCurlText] = useState('');
@@ -924,6 +1002,31 @@ export default function Home() {
     if (valid.length) openRunnerWithSteps(valid, `Run: ${rb.name}`);
   }
 
+  function applyTemplate(t: ServiceTemplate) {
+    const reqs = t.requests.map((r) =>
+      makeRequest({
+        name: r.name,
+        method: r.method,
+        url: r.url,
+        headers: (r.headers ?? [['Accept', 'application/json']]).map(([k, v]) => ({ id: uid(), key: k, value: v, enabled: true })),
+        body: r.body ?? '',
+        auth: { ...defaultAuth(), ...(r.auth ?? {}) },
+      }),
+    );
+    const col: Collection = {
+      id: uid(),
+      name: t.name,
+      requestIds: reqs.map((r) => r.id),
+      variables: t.variables.map((v) => ({ id: uid(), key: v.key, value: v.value, enabled: true, secret: v.secret })),
+    };
+    setRequests((rs) => [...rs, ...reqs]);
+    setCollections((cols) => [...cols, col]);
+    setExpanded((e) => ({ ...e, [col.id]: true }));
+    if (reqs[0]) openRequest(reqs[0].id);
+    setTemplatesOpen(false);
+    setDrawerOpen(false);
+  }
+
   function openCurlImport(collectionId: string) {
     setCurlTarget(collectionId);
     setCurlText('');
@@ -1184,6 +1287,34 @@ export default function Home() {
       onClick={() => setMenu('')}
     >
       <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+      {templatesOpen && (
+        <div className="lock-backdrop" onClick={() => setTemplatesOpen(false)}>
+          <div className="tpl-card" onClick={(e) => e.stopPropagation()}>
+            <div className="runner-head">
+              <h2>New from template</h2>
+              <button className="icon-btn" onClick={() => setTemplatesOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <p className="lock-hint">
+              Creates a collection with ready-made requests and placeholder variables. Fill in your own keys/tokens after
+              — nothing here contains real credentials.
+            </p>
+            <div className="tpl-grid">
+              {serviceTemplates.map((t) => (
+                <button key={t.id} className="tpl-item" onClick={() => applyTemplate(t)}>
+                  <span className="tpl-name">{t.name}</span>
+                  <span className="tpl-blurb">{t.blurb}</span>
+                  <span className="tpl-meta">
+                    {t.requests.length} request{t.requests.length === 1 ? '' : 's'}
+                    {t.variables.length > 0 && ` · ${t.variables.length} variable${t.variables.length === 1 ? '' : 's'}`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {curlOpen && (
         <div className="lock-backdrop" onClick={() => setCurlOpen(false)}>
           <div className="curl-card" onClick={(e) => e.stopPropagation()}>
@@ -1466,6 +1597,14 @@ export default function Home() {
                 🔓
               </button>
             )}
+            <button
+              className="icon-btn"
+              title="New collection from a service template"
+              onClick={() => setTemplatesOpen(true)}
+              aria-label="New from template"
+            >
+              ✦
+            </button>
             <button className="icon-btn" title="New collection" onClick={addCollection} aria-label="New collection">
               +
             </button>

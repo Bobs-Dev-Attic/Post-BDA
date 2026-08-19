@@ -550,6 +550,37 @@ pre {
 }
 .add-row:hover { text-decoration: underline; }
 
+/* service templates modal */
+.tpl-card {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  gap: .8rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.4rem;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+}
+.tpl-grid { display: grid; gap: .5rem; }
+.tpl-item {
+  text-align: left;
+  display: grid;
+  gap: .2rem;
+  padding: .7rem .8rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--input-bg);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.tpl-item:hover { border-color: var(--accent); background: var(--hover); }
+.tpl-name { font-weight: 700; }
+.tpl-blurb { font-size: .82rem; color: var(--muted); line-height: 1.4; }
+.tpl-meta { font-size: .72rem; color: var(--accent); font-weight: 600; }
+
 /* cURL import modal */
 .curl-card {
   width: 100%;
