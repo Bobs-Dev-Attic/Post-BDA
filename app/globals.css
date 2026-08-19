@@ -550,6 +550,26 @@ pre {
 }
 .add-row:hover { text-decoration: underline; }
 
+/* cURL import modal */
+.curl-card {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  gap: .8rem;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.4rem;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+}
+.curl-input {
+  min-height: 150px;
+  font-family: "SFMono-Regular", Consolas, ui-monospace, monospace;
+  font-size: 13px;
+  white-space: pre;
+  overflow: auto;
+}
+
 /* runbooks panel */
 .runbook-list { overflow: auto; padding: .5rem .5rem 1rem; flex: 1; min-height: 0; display: grid; gap: .6rem; align-content: start; }
 .rb-new {

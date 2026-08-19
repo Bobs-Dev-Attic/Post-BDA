@@ -204,6 +204,10 @@ export default function Home() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [curlOpen, setCurlOpen] = useState(false);
+  const [curlTarget, setCurlTarget] = useState('');
+  const [curlText, setCurlText] = useState('');
+  const [curlError, setCurlError] = useState('');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -920,6 +924,40 @@ export default function Home() {
     if (valid.length) openRunnerWithSteps(valid, `Run: ${rb.name}`);
   }
 
+  function openCurlImport(collectionId: string) {
+    setCurlTarget(collectionId);
+    setCurlText('');
+    setCurlError('');
+    setCurlOpen(true);
+    setMenu('');
+    setDrawerOpen(false);
+  }
+
+  function importCurl() {
+    const parsed = parseCurl(curlText);
+    if (!parsed) {
+      setCurlError('Could not parse that — paste a full cURL command including the URL.');
+      return;
+    }
+    const req = makeRequest({
+      name: nameFromUrl(parsed.url),
+      method: parsed.method,
+      url: parsed.url,
+      headers: parsed.headers.length ? parsed.headers : [{ id: uid(), key: 'Accept', value: 'application/json', enabled: true }],
+      body: parsed.body,
+      auth: parsed.auth,
+    });
+    setRequests((rs) => [...rs, req]);
+    const target = collections.some((c) => c.id === curlTarget) ? curlTarget : collections[0]?.id;
+    if (target) {
+      setCollections((cols) => cols.map((c) => (c.id === target ? { ...c, requestIds: [...c.requestIds, req.id] } : c)));
+    }
+    openRequest(req.id);
+    setCurlOpen(false);
+    setCurlText('');
+    setCurlError('');
+  }
+
   function moveStep(id: string, dir: -1 | 1) {
     setRunnerStepIds((ids) => {
       const i = ids.indexOf(id);
@@ -1146,6 +1184,42 @@ export default function Home() {
       onClick={() => setMenu('')}
     >
       <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+      {curlOpen && (
+        <div className="lock-backdrop" onClick={() => setCurlOpen(false)}>
+          <div className="curl-card" onClick={(e) => e.stopPropagation()}>
+            <div className="runner-head">
+              <h2>Import cURL</h2>
+              <button className="icon-btn" onClick={() => setCurlOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <p className="lock-hint">
+              Paste a <code>curl</code> command from an API's docs or your terminal. Method, URL, headers, body, and
+              Basic/Bearer auth are parsed into a new request.
+            </p>
+            <textarea
+              className="curl-input"
+              value={curlText}
+              onChange={(e) => {
+                setCurlText(e.target.value);
+                setCurlError('');
+              }}
+              placeholder={"curl https://api.example.com/v1/users \\\n  -H 'Authorization: Bearer {{token}}' \\\n  -d '{\"name\":\"ada\"}'"}
+              spellCheck={false}
+              autoFocus
+            />
+            {curlError && <p className="lock-error">{curlError}</p>}
+            <div className="runner-actions">
+              <button className="btn-ghost" onClick={() => setCurlOpen(false)}>
+                Cancel
+              </button>
+              <button className="send" onClick={importCurl} disabled={!curlText.trim()}>
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {lockModal && (
         <LockModal
           mode={lockModal}
@@ -1508,6 +1582,7 @@ export default function Home() {
                     items={[
                       { label: 'Run in order', onClick: () => openRunner(collection.id) },
                       { label: 'Add request', onClick: () => addRequest(collection.id) },
+                      { label: 'Import cURL…', onClick: () => openCurlImport(collection.id) },
                       { label: 'Rename', onClick: () => setRenaming(collection.id) },
                       { label: 'Delete', danger: true, onClick: () => deleteCollection(collection.id) },
                     ]}
@@ -1829,7 +1904,9 @@ export default function Home() {
                   <>
                     <p className="auth-hint">
                       Variables are scoped to the <b>{activeCollection.name}</b> collection — each collection keeps its
-                      own set, and extraction writes here.
+                      own set, and extraction writes here. Dynamic values also work anywhere: <code>{'{{$guid}}'}</code>,{' '}
+                      <code>{'{{$timestamp}}'}</code>, <code>{'{{$isoTimestamp}}'}</code>, <code>{'{{$randomInt}}'}</code>{' '}
+                      (or <code>{'{{$randomInt:1:100}}'}</code>).
                     </p>
                     <Rows
                       rows={activeVariables}
@@ -2420,8 +2497,148 @@ function countRows(rows: KeyValue[]) {
   return rows.filter((r) => r.enabled && r.key).length;
 }
 
+// Postman-style dynamic variables, resolved fresh at substitution time.
+// e.g. {{$guid}}, {{$timestamp}}, {{$isoTimestamp}}, {{$randomInt}}, {{$randomInt:1:100}}
+function dynamicVar(token: string): string | null {
+  const [name, ...args] = token.slice(1).split(':');
+  switch (name) {
+    case 'guid':
+    case 'randomUUID':
+      return crypto.randomUUID();
+    case 'timestamp':
+      return String(Math.floor(Date.now() / 1000));
+    case 'isoTimestamp':
+      return new Date().toISOString();
+    case 'randomInt': {
+      const min = Number.isFinite(Number(args[0])) ? Number(args[0]) : 0;
+      const max = args[1] !== undefined && Number.isFinite(Number(args[1])) ? Number(args[1]) : 1000;
+      const lo = Math.min(min, max);
+      const hi = Math.max(min, max);
+      return String(Math.floor(Math.random() * (hi - lo + 1)) + lo);
+    }
+    default:
+      return null; // unknown $token — leave the placeholder untouched
+  }
+}
+
 function applyVariables(value: string, variables: Record<string, string>) {
-  return value.replace(/{{\s*([\w.-]+)\s*}}/g, (_, key) => variables[key] ?? '');
+  return value.replace(/{{\s*([\w.$:-]+)\s*}}/g, (match, key: string) => {
+    if (key.startsWith('$')) {
+      const dyn = dynamicVar(key);
+      return dyn === null ? match : dyn;
+    }
+    return variables[key] ?? '';
+  });
+}
+
+// Shell-aware tokenizer: respects single/double quotes, backslash escapes, and
+// line continuations, so a pasted multi-line cURL command parses correctly.
+function tokenizeCurl(input: string): string[] {
+  const s = input.replace(/\\\r?\n/g, ' ');
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < s.length) {
+    while (i < s.length && /\s/.test(s[i])) i++;
+    if (i >= s.length) break;
+    let tok = '';
+    while (i < s.length && !/\s/.test(s[i])) {
+      const c = s[i];
+      if (c === "'") {
+        i++;
+        while (i < s.length && s[i] !== "'") tok += s[i++];
+        i++;
+      } else if (c === '"') {
+        i++;
+        while (i < s.length && s[i] !== '"') {
+          if (s[i] === '\\' && i + 1 < s.length) {
+            tok += s[i + 1];
+            i += 2;
+          } else tok += s[i++];
+        }
+        i++;
+      } else if (c === '\\' && i + 1 < s.length) {
+        tok += s[i + 1];
+        i += 2;
+      } else {
+        tok += c;
+        i++;
+      }
+    }
+    tokens.push(tok);
+  }
+  return tokens;
+}
+
+type ParsedCurl = { method: string; url: string; headers: KeyValue[]; body: string; auth: Auth };
+
+function parseCurl(input: string): ParsedCurl | null {
+  const tokens = tokenizeCurl(input.trim());
+  if (!tokens.length) return null;
+  let i = tokens[0] === 'curl' ? 1 : 0;
+  let method = '';
+  let url = '';
+  const headers: KeyValue[] = [];
+  const dataParts: string[] = [];
+  let auth: Auth | null = null;
+  const valueFlags = new Set(['-o', '--output', '-m', '--max-time', '--connect-timeout', '--retry']);
+  for (; i < tokens.length; i++) {
+    const t = tokens[i];
+    const next = () => tokens[++i] ?? '';
+    if (t === '-X' || t === '--request') method = next().toUpperCase();
+    else if (t === '-H' || t === '--header') {
+      const h = next();
+      const ci = h.indexOf(':');
+      if (ci > 0) headers.push({ id: uid(), key: h.slice(0, ci).trim(), value: h.slice(ci + 1).trim(), enabled: true });
+    } else if (t === '--url') url = next();
+    else if (t === '-u' || t === '--user') {
+      const up = next();
+      const ci = up.indexOf(':');
+      auth = { ...defaultAuth(), type: 'basic', username: ci >= 0 ? up.slice(0, ci) : up, password: ci >= 0 ? up.slice(ci + 1) : '' };
+    } else if (t === '-d' || t === '--data' || t === '--data-raw' || t === '--data-binary' || t === '--data-ascii' || t === '--data-urlencode') {
+      dataParts.push(next());
+    } else if (t === '-b' || t === '--cookie') {
+      headers.push({ id: uid(), key: 'Cookie', value: next(), enabled: true });
+    } else if (t === '-A' || t === '--user-agent') {
+      headers.push({ id: uid(), key: 'User-Agent', value: next(), enabled: true });
+    } else if (t === '-e' || t === '--referer') {
+      headers.push({ id: uid(), key: 'Referer', value: next(), enabled: true });
+    } else if (t === '-I' || t === '--head') {
+      method = 'HEAD';
+    } else if (valueFlags.has(t)) {
+      next(); // consume and ignore the value
+    } else if (t.startsWith('-')) {
+      // boolean flag we don't model (-s, -L, -k, --compressed, …) — ignore
+    } else if (!url) {
+      url = t;
+    }
+  }
+  if (!url) return null;
+  const body = dataParts.join('&');
+  if (!method) method = body ? 'POST' : 'GET';
+
+  // Lift a Bearer Authorization header into the structured auth field.
+  let finalAuth = auth ?? defaultAuth();
+  if (!auth) {
+    const ai = headers.findIndex((h) => h.key.toLowerCase() === 'authorization');
+    if (ai >= 0) {
+      const m = /^Bearer\s+(.+)$/i.exec(headers[ai].value);
+      if (m) {
+        finalAuth = { ...defaultAuth(), type: 'bearer', token: m[1].trim() };
+        headers.splice(ai, 1);
+      }
+    }
+  }
+  return { method, url, headers, body, auth: finalAuth };
+}
+
+function nameFromUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const seg = u.pathname.split('/').filter(Boolean).pop();
+    return seg ? `${seg} · ${u.hostname}` : u.hostname;
+  } catch {
+    return 'Imported request';
+  }
 }
 
 function applyAuth(headers: Record<string, string>, auth: Auth, variables: Record<string, string>) {
