@@ -49,7 +49,7 @@ type ExecOutcome = {
   headers?: Headers;
   body: string;
 };
-type RunnerStepStatus = { state: 'pending' | 'running' | 'ok' | 'fail'; status?: number; ms?: number; note?: string };
+type RunnerStepStatus = { state: 'pending' | 'waiting' | 'running' | 'ok' | 'fail'; status?: number; ms?: number; note?: string };
 type EditorTab = 'params' | 'auth' | 'headers' | 'body' | 'variables' | 'extract';
 type ResponseView = 'pretty' | 'raw' | 'preview' | 'headers';
 type RequestSnapshot = Pick<RequestConfig, 'method' | 'url' | 'params' | 'headers' | 'body' | 'auth'>;
@@ -212,6 +212,7 @@ export default function Home() {
   const [runnerStatus, setRunnerStatus] = useState<Record<string, RunnerStepStatus>>({});
   const [runnerBusy, setRunnerBusy] = useState(false);
   const [runnerStopOnError, setRunnerStopOnError] = useState(true);
+  const [runnerDelayMs, setRunnerDelayMs] = useState(0);
   const [runnerTitle, setRunnerTitle] = useState('Run in order');
   const [theme, setTheme] = useState('midnight');
   const [sidebarWidth, setSidebarWidth] = useState(288);
@@ -795,7 +796,13 @@ export default function Home() {
     const results: Record<string, RunnerStepStatus> = {};
     steps.forEach((s) => (results[s.id] = { state: 'pending' }));
     setRunnerStatus({ ...results });
-    for (const req of steps) {
+    for (let i = 0; i < steps.length; i++) {
+      const req = steps[i];
+      if (i > 0 && runnerDelayMs > 0) {
+        results[req.id] = { state: 'waiting' };
+        setRunnerStatus({ ...results });
+        await new Promise((resolve) => setTimeout(resolve, runnerDelayMs));
+      }
       results[req.id] = { state: 'running' };
       setRunnerStatus({ ...results });
       setActiveId(req.id);
@@ -1155,6 +1162,7 @@ export default function Home() {
                     <span className={`method m-${req.method}`}>{req.method}</span>
                     <span className="runner-name">{req.name}</span>
                     <span className="runner-state">
+                      {st?.state === 'waiting' && <span className="runner-wait">waiting…</span>}
                       {st?.state === 'running' && <span className="runner-spin">running…</span>}
                       {st?.state === 'ok' && <b className="ok">{st.status}</b>}
                       {st?.state === 'fail' && <b className="bad">{st.status ?? '✕'}</b>}
@@ -1192,6 +1200,19 @@ export default function Home() {
                 onChange={(e) => setRunnerStopOnError(e.target.checked)}
               />
               <span>Stop on first error (status ≥ 400 or network failure)</span>
+            </label>
+            <label className="runner-delay">
+              <span>Delay between steps</span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={runnerDelayMs}
+                disabled={runnerBusy}
+                onChange={(e) => setRunnerDelayMs(Math.max(0, Number(e.target.value) || 0))}
+                aria-label="Delay between steps in milliseconds"
+              />
+              <span className="runner-delay-unit">ms</span>
             </label>
             <div className="runner-actions">
               <button className="btn-ghost" onClick={() => !runnerBusy && setRunnerOpen(false)}>

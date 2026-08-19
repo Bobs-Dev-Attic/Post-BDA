@@ -614,6 +614,11 @@ pre {
 .runner-state .ok { color: var(--m-get); font-weight: 800; }
 .runner-state .bad { color: var(--danger); font-weight: 800; }
 .runner-spin { color: var(--accent); font-weight: 600; }
+.runner-wait { color: var(--muted); font-style: italic; }
+.runner-step.waiting { box-shadow: inset 2px 0 0 var(--muted); }
+.runner-delay { display: flex; align-items: center; gap: .55rem; font-size: .86rem; padding: .1rem .2rem; }
+.runner-delay input { width: 92px; padding: .4rem .5rem; }
+.runner-delay-unit { color: var(--muted); }
 .runner-note { color: var(--accent); font-weight: 600; }
 .runner-move { display: inline-flex; gap: .1rem; }
 .runner-move .icon-btn:disabled { opacity: .3; cursor: default; }
