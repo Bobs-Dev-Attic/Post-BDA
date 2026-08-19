@@ -449,6 +449,31 @@ pre {
 .row { display: grid; grid-template-columns: 30px 1fr 1.4fr 30px; gap: .45rem; align-items: center; }
 .row.secretable { grid-template-columns: 30px 1fr 1.4fr 30px 30px; }
 .row input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--accent); justify-self: center; }
+/* variable names stand out: italic accent, framed as {{ name }} */
+.var-key-wrap { position: relative; display: block; }
+.var-key-wrap::before,
+.var-key-wrap::after {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--accent);
+  opacity: .65;
+  font-family: "SFMono-Regular", Consolas, ui-monospace, monospace;
+  font-weight: 700;
+  pointer-events: none;
+}
+.var-key-wrap::before { content: '{{'; left: .55rem; }
+.var-key-wrap::after { content: '}}'; right: .55rem; }
+.var-key {
+  padding-left: 1.7rem;
+  padding-right: 1.7rem;
+  font-style: italic;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: "SFMono-Regular", Consolas, ui-monospace, monospace;
+}
+.var-key::placeholder { font-style: italic; color: var(--muted); }
+
 .value-wrap { position: relative; }
 .value-wrap input { padding-right: 2rem; }
 .eye {
