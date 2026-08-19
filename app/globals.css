@@ -622,6 +622,26 @@ pre {
 .runner-note { color: var(--accent); font-weight: 600; }
 .runner-move { display: inline-flex; gap: .1rem; }
 .runner-move .icon-btn:disabled { opacity: .3; cursor: default; }
+.runner-summary {
+  display: grid;
+  gap: .25rem;
+  padding: .6rem .7rem;
+  border-radius: 9px;
+  border: 1px solid var(--line-soft);
+  background: var(--input-bg);
+}
+.runner-summary.all-pass { border-color: rgba(88, 200, 150, .5); }
+.runner-summary.has-fail { border-color: rgba(251, 113, 133, .5); }
+.rs-headline { font-weight: 700; font-size: .9rem; }
+.runner-summary.all-pass .rs-headline { color: var(--m-get); }
+.runner-summary.has-fail .rs-headline { color: var(--danger); }
+.rs-stats { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .82rem; color: var(--muted); }
+.rs-stats .ok { color: var(--m-get); font-weight: 800; }
+.rs-stats .bad { color: var(--danger); font-weight: 800; }
+.rs-skip { font-style: italic; }
+.rs-sep { color: var(--line); }
+.rs-req { opacity: .8; }
+
 .runner-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 .runner-actions .send { padding: .55rem 1.3rem; }
 
