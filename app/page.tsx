@@ -203,6 +203,8 @@ export default function Home() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [lastSynced, setLastSynced] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [runnerStepIds, setRunnerStepIds] = useState<string[]>([]);
@@ -944,6 +946,7 @@ export default function Home() {
   async function pushWorkspace(silent: boolean): Promise<boolean> {
     const code = syncCode.trim();
     if (!code || !cryptoKey || !salt) return false;
+    setSyncing(true);
     try {
       const workspace: WorkspaceData = { collections, requests, openTabs, activeId, expanded, sessionOnly, history, runbooks };
       const envelope = await encryptWorkspace(cryptoKey, salt, sessionOnly ? redactSecrets(workspace) : workspace);
@@ -953,12 +956,16 @@ export default function Home() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id, blob: envelope }),
       });
-      if (res.ok) setSyncMsg(silent ? 'Auto-synced ✓' : 'Pushed to cloud.');
-      else if (!silent) setSyncMsg(`Push failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
+      if (res.ok) {
+        setSyncMsg(silent ? 'Auto-synced ✓' : 'Pushed to cloud.');
+        setLastSynced(Date.now());
+      } else if (!silent) setSyncMsg(`Push failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
       return res.ok;
     } catch (caught) {
       if (!silent) setSyncMsg(caught instanceof Error ? caught.message : 'Push failed.');
       return false;
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -986,6 +993,7 @@ export default function Home() {
       const workspace = await decryptWorkspace(key, blob);
       suppressPushRef.current = true; // don't immediately re-push what we just pulled
       loadWorkspace(workspace);
+      setLastSynced(Date.now());
       setSyncMsg('Synced from cloud ✓');
     } catch {
       /* leave local workspace intact on any failure */
@@ -1020,6 +1028,7 @@ export default function Home() {
       }
       if (!window.confirm('Pull will replace your current workspace with the cloud copy. Continue?')) return;
       loadWorkspace(workspace);
+      setLastSynced(Date.now());
       setMenu('');
       setSyncMsg('Pulled from cloud.');
     } catch (caught) {
@@ -1326,15 +1335,49 @@ export default function Home() {
             </button>
           </div>
         </div>
-        <div className="save-status" title={lastSaved ? `Workspace saved locally at ${new Date(lastSaved).toLocaleString()}` : undefined}>
-          {lastSaved ? (
-            <>
-              <span key={lastSaved} className="save-dot" aria-hidden />
-              <span>Saved {new Date(lastSaved).toLocaleTimeString()}</span>
-            </>
-          ) : (
-            <span className="save-idle">Not saved yet</span>
-          )}
+        <div className="save-status">
+          <span
+            className="save-seg"
+            title={lastSaved ? `Workspace saved locally at ${new Date(lastSaved).toLocaleString()}` : undefined}
+          >
+            {lastSaved ? (
+              <>
+                <span key={lastSaved} className="save-dot" aria-hidden />
+                <span>Saved {new Date(lastSaved).toLocaleTimeString()}</span>
+              </>
+            ) : (
+              <span className="save-idle">Not saved yet</span>
+            )}
+          </span>
+          <span className="save-divider" aria-hidden>
+            ·
+          </span>
+          <span
+            className="save-seg"
+            title={
+              !autoSync
+                ? 'Automatic cloud sync is off — use Push in Settings, or enable Automatic sync'
+                : lastSynced
+                  ? `Last cloud sync at ${new Date(lastSynced).toLocaleString()}`
+                  : 'Automatic sync is on — waiting for a sync code and passphrase'
+            }
+          >
+            {syncing ? (
+              <>
+                <span className="sync-dot syncing" aria-hidden />
+                <span>Syncing…</span>
+              </>
+            ) : !autoSync ? (
+              <span className="save-idle">Cloud off</span>
+            ) : lastSynced ? (
+              <>
+                <span key={lastSynced} className="sync-dot" aria-hidden />
+                <span>Synced {new Date(lastSynced).toLocaleTimeString()}</span>
+              </>
+            ) : (
+              <span className="save-idle">Cloud on</span>
+            )}
+          </span>
         </div>
 
         <div className="side-tabs">
