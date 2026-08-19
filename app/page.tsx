@@ -202,6 +202,7 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('collections');
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
+  const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [runnerStepIds, setRunnerStepIds] = useState<string[]>([]);
@@ -343,10 +344,14 @@ export default function Home() {
     const toStore = sessionOnly ? redactSecrets(workspace) : workspace;
     if (cryptoKey && salt) {
       encryptWorkspace(cryptoKey, salt, toStore)
-        .then((env) => localStorage.setItem(storageKey, JSON.stringify(env)))
+        .then((env) => {
+          localStorage.setItem(storageKey, JSON.stringify(env));
+          setLastSaved(Date.now());
+        })
         .catch(() => {});
     } else {
       localStorage.setItem(storageKey, JSON.stringify(toStore));
+      setLastSaved(Date.now());
     }
   }, [collections, requests, openTabs, activeId, expanded, sessionOnly, history, runbooks, cryptoKey, salt]);
 
@@ -1320,6 +1325,16 @@ export default function Home() {
               +
             </button>
           </div>
+        </div>
+        <div className="save-status" title={lastSaved ? `Workspace saved locally at ${new Date(lastSaved).toLocaleString()}` : undefined}>
+          {lastSaved ? (
+            <>
+              <span key={lastSaved} className="save-dot" aria-hidden />
+              <span>Saved {new Date(lastSaved).toLocaleTimeString()}</span>
+            </>
+          ) : (
+            <span className="save-idle">Not saved yet</span>
+          )}
         </div>
 
         <div className="side-tabs">
