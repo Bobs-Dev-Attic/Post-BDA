@@ -2236,7 +2236,19 @@ function Rows({
             onChange={(e) => onChange(row.id, { enabled: e.target.checked })}
             aria-label="Enabled"
           />
-          <input value={row.key} onChange={(e) => onChange(row.id, { key: e.target.value })} placeholder="Key" />
+          {secretable ? (
+            <span className="var-key-wrap">
+              <input
+                className="var-key"
+                value={row.key}
+                onChange={(e) => onChange(row.id, { key: e.target.value })}
+                placeholder="name"
+                spellCheck={false}
+              />
+            </span>
+          ) : (
+            <input value={row.key} onChange={(e) => onChange(row.id, { key: e.target.value })} placeholder="Key" />
+          )}
           {secretable ? (
             <div className="value-wrap">
               <input
