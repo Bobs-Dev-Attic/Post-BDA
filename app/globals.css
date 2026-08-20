@@ -594,6 +594,24 @@ pre {
 .tpl-blurb { font-size: .82rem; color: var(--muted); line-height: 1.4; }
 .tpl-meta { font-size: .72rem; color: var(--accent); font-weight: 600; }
 
+/* share-code display */
+.share-code-box {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem .7rem;
+  border: 1px solid var(--accent);
+  border-radius: 9px;
+  background: var(--active);
+}
+.share-code {
+  flex: 1;
+  font-family: "SFMono-Regular", Consolas, ui-monospace, monospace;
+  font-size: 13px;
+  word-break: break-all;
+  color: var(--text);
+}
+
 /* cURL import modal */
 .curl-card {
   width: 100%;

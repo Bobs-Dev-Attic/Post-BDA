@@ -69,6 +69,7 @@ type HistoryEntry = {
 };
 type SidebarView = 'collections' | 'history' | 'runbooks';
 type Runbook = { id: string; name: string; stepIds: string[] };
+type SharePayload = { v: 1; name: string; variables: KeyValue[]; requests: RequestConfig[] };
 type WorkspaceData = {
   collections: Collection[];
   requests: RequestConfig[];
@@ -462,6 +463,18 @@ export default function Home() {
   const [curlTarget, setCurlTarget] = useState('');
   const [curlText, setCurlText] = useState('');
   const [curlError, setCurlError] = useState('');
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareCollectionId, setShareCollectionId] = useState('');
+  const [sharePass, setSharePass] = useState('');
+  const [shareIncludeSecrets, setShareIncludeSecrets] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareResultCode, setShareResultCode] = useState('');
+  const [shareMsg, setShareMsg] = useState('');
+  const [importShareOpen, setImportShareOpen] = useState(false);
+  const [importCode, setImportCode] = useState('');
+  const [importPass, setImportPass] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
   const [lastSynced, setLastSynced] = useState<number | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -1285,6 +1298,118 @@ export default function Home() {
     setCurlError('');
   }
 
+  // ---- Secure collection sharing (E2E encrypted, via /api/share) ----
+  function openShare(collectionId: string) {
+    setShareCollectionId(collectionId);
+    setSharePass('');
+    setShareIncludeSecrets(false);
+    setShareResultCode('');
+    setShareMsg('');
+    setShareOpen(true);
+    setMenu('');
+    setDrawerOpen(false);
+  }
+
+  async function doShare() {
+    const col = collections.find((c) => c.id === shareCollectionId);
+    if (!col) return;
+    if (sharePass.length < 6) {
+      setShareMsg('Use a share passphrase of at least 6 characters.');
+      return;
+    }
+    setShareBusy(true);
+    setShareMsg('');
+    try {
+      const reqs = col.requestIds.map((id) => requestById(id)).filter((r): r is RequestConfig => Boolean(r));
+      let variables = col.variables ?? [];
+      let requests = reqs;
+      if (!shareIncludeSecrets) {
+        variables = variables.map((v) => (v.secret ? { ...v, value: '' } : v));
+        requests = requests.map((r) => ({ ...r, auth: { ...r.auth, token: '', username: '', password: '', value: '' } }));
+      }
+      const payload: SharePayload = { v: 1, name: col.name, variables, requests };
+      const code = `${uid()}-${uid().slice(0, 8)}`;
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const key = await deriveKey(sharePass, salt);
+      const envelope = await encryptJson(key, salt, payload);
+      const id = await sha256hex(code);
+      const res = await fetch('/api/share', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id, blob: envelope }),
+      });
+      if (!res.ok) {
+        setShareMsg(`Share failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
+        return;
+      }
+      setShareResultCode(code);
+      setShareMsg('Shared. Send the recipient the share code below, and the passphrase through a separate channel.');
+    } catch (caught) {
+      setShareMsg(caught instanceof Error ? caught.message : 'Share failed.');
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  function openImportShare() {
+    setImportCode('');
+    setImportPass('');
+    setImportMsg('');
+    setImportShareOpen(true);
+    setMenu('');
+    setDrawerOpen(false);
+  }
+
+  async function doImportShare() {
+    const code = importCode.trim();
+    if (!code) return setImportMsg('Enter the share code.');
+    if (!importPass) return setImportMsg('Enter the share passphrase.');
+    setImportBusy(true);
+    setImportMsg('');
+    try {
+      const id = await sha256hex(code);
+      const res = await fetch(`/api/share?id=${id}`);
+      if (res.status === 404) {
+        setImportMsg('No shared collection for that code.');
+        return;
+      }
+      if (!res.ok) {
+        setImportMsg(`Import failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
+        return;
+      }
+      const { blob } = (await res.json()) as { blob: Envelope };
+      let payload: SharePayload;
+      try {
+        const key = await deriveKey(importPass, fromB64(blob.salt));
+        payload = await decryptJson<SharePayload>(key, blob);
+      } catch {
+        setImportMsg('Could not decrypt — the passphrase does not match this share.');
+        return;
+      }
+      const idMap = new Map<string, string>();
+      const newReqs = (payload.requests ?? []).map((r) => {
+        const nid = uid();
+        idMap.set(r.id, nid);
+        return normalizeRequest({ ...r, id: nid });
+      });
+      const col: Collection = {
+        id: uid(),
+        name: payload.name || 'Shared collection',
+        requestIds: (payload.requests ?? []).map((r) => idMap.get(r.id)!).filter(Boolean),
+        variables: (payload.variables ?? []).map((v) => ({ ...v, id: uid() })),
+      };
+      setRequests((rs) => [...rs, ...newReqs]);
+      setCollections((cols) => [...cols, col]);
+      setExpanded((e) => ({ ...e, [col.id]: true }));
+      if (newReqs[0]) openRequest(newReqs[0].id);
+      setImportShareOpen(false);
+    } catch (caught) {
+      setImportMsg(caught instanceof Error ? caught.message : 'Import failed.');
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   function moveStep(id: string, dir: -1 | 1) {
     setRunnerStepIds((ids) => {
       const i = ids.indexOf(id);
@@ -1550,6 +1675,102 @@ export default function Home() {
           </div>
         </div>
       )}
+      {shareOpen && (
+        <div className="lock-backdrop" onClick={() => !shareBusy && setShareOpen(false)}>
+          <div className="tpl-card" onClick={(e) => e.stopPropagation()}>
+            <div className="runner-head">
+              <h2>Share collection</h2>
+              <button className="icon-btn" onClick={() => !shareBusy && setShareOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <p className="lock-hint">
+              Encrypts this collection with a passphrase and uploads only ciphertext. Share the code with your recipient
+              and give them the passphrase separately. Secret values are stripped unless you include them.
+            </p>
+            <input
+              type="password"
+              value={sharePass}
+              onChange={(e) => {
+                setSharePass(e.target.value);
+                setShareMsg('');
+              }}
+              placeholder="Share passphrase (min 6 chars)"
+              autoComplete="new-password"
+            />
+            <label className="menu-toggle">
+              <input
+                type="checkbox"
+                checked={shareIncludeSecrets}
+                onChange={(e) => setShareIncludeSecrets(e.target.checked)}
+              />
+              <span>Include secret values (tokens, passwords, API keys)</span>
+            </label>
+            {shareResultCode && (
+              <div className="share-code-box">
+                <span className="share-code">{shareResultCode}</span>
+                <button
+                  className="btn-ghost"
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(shareResultCode)}
+                >
+                  Copy code
+                </button>
+              </div>
+            )}
+            {shareMsg && <p className="menu-note sync-msg">{shareMsg}</p>}
+            <div className="runner-actions">
+              <button className="btn-ghost" onClick={() => !shareBusy && setShareOpen(false)}>
+                Close
+              </button>
+              <button className="send" onClick={doShare} disabled={shareBusy || !sharePass}>
+                {shareBusy ? 'Sharing…' : shareResultCode ? 'Re-share' : 'Create share'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {importShareOpen && (
+        <div className="lock-backdrop" onClick={() => !importBusy && setImportShareOpen(false)}>
+          <div className="tpl-card" onClick={(e) => e.stopPropagation()}>
+            <div className="runner-head">
+              <h2>Import shared collection</h2>
+              <button className="icon-btn" onClick={() => !importBusy && setImportShareOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <p className="lock-hint">Enter the share code and passphrase you were given. It's added as a new collection.</p>
+            <input
+              value={importCode}
+              onChange={(e) => {
+                setImportCode(e.target.value);
+                setImportMsg('');
+              }}
+              placeholder="Share code"
+              spellCheck={false}
+            />
+            <input
+              type="password"
+              value={importPass}
+              onChange={(e) => {
+                setImportPass(e.target.value);
+                setImportMsg('');
+              }}
+              placeholder="Share passphrase"
+              autoComplete="off"
+            />
+            {importMsg && <p className="menu-note sync-msg">{importMsg}</p>}
+            <div className="runner-actions">
+              <button className="btn-ghost" onClick={() => !importBusy && setImportShareOpen(false)}>
+                Cancel
+              </button>
+              <button className="send" onClick={doImportShare} disabled={importBusy || !importCode.trim() || !importPass}>
+                {importBusy ? 'Importing…' : 'Import'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {curlOpen && (
         <div className="lock-backdrop" onClick={() => setCurlOpen(false)}>
           <div className="curl-card" onClick={(e) => e.stopPropagation()}>
@@ -1751,6 +1972,9 @@ export default function Home() {
                   </button>
                   <button className="menu-item" onClick={() => importRef.current?.click()}>
                     Import from file
+                  </button>
+                  <button className="menu-item" onClick={openImportShare}>
+                    Import shared collection…
                   </button>
 
                   <div className="menu-label">Cloud sync (Neon)</div>
@@ -1957,6 +2181,7 @@ export default function Home() {
                       { label: 'Run in order', onClick: () => openRunner(collection.id) },
                       { label: 'Add request', onClick: () => addRequest(collection.id) },
                       { label: 'Import cURL…', onClick: () => openCurlImport(collection.id) },
+                      { label: 'Share…', onClick: () => openShare(collection.id) },
                       { label: 'Rename', onClick: () => setRenaming(collection.id) },
                       { label: 'Delete', danger: true, onClick: () => deleteCollection(collection.id) },
                     ]}
@@ -3288,4 +3513,18 @@ async function decryptWorkspace(key: CryptoKey, env: Envelope): Promise<Workspac
   const cipher = fromB64(env.ct);
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, cipher as BufferSource);
   return JSON.parse(new TextDecoder().decode(plain)) as WorkspaceData;
+}
+
+// Generic AES-GCM encrypt/decrypt of any JSON value — used for collection shares.
+async function encryptJson(key: CryptoKey, salt: Uint8Array, obj: unknown): Promise<Envelope> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encoded = new TextEncoder().encode(JSON.stringify(obj));
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+  return { enc: true, v: 1, salt: toB64(salt), iv: toB64(iv), ct: toB64(new Uint8Array(cipher)) };
+}
+async function decryptJson<T>(key: CryptoKey, env: Envelope): Promise<T> {
+  const iv = fromB64(env.iv);
+  const cipher = fromB64(env.ct);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as BufferSource }, key, cipher as BufferSource);
+  return JSON.parse(new TextDecoder().decode(plain)) as T;
 }
