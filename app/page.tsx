@@ -728,6 +728,14 @@ export default function Home() {
     updateActive({ url: base + hash, params: merged });
   }
 
+  // Populate Params from an existing URL query without needing a manual blur —
+  // e.g. right after load, or when opening the Params tab on a request whose URL
+  // already carries a query string.
+  useEffect(() => {
+    if (editorTab === 'params' && active && active.url.includes('?')) absorbUrlQuery();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorTab, activeId, active?.url]);
+
   function updateAuth(patch: Partial<Auth>) {
     if (active) updateActive({ auth: { ...active.auth, ...patch } });
   }
@@ -1298,7 +1306,10 @@ export default function Home() {
 
   function sendRequest(event: FormEvent) {
     event.preventDefault();
-    if (active) runRequest(active);
+    if (active) {
+      absorbUrlQuery(); // reflect any typed query string into Params (send still uses the raw URL)
+      runRequest(active);
+    }
   }
 
   function replayHistory(entry: HistoryEntry) {
