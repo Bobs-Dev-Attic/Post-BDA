@@ -438,7 +438,7 @@ pre {
 }
 .send:hover:not(:disabled) { filter: brightness(1.06); }
 .send:disabled { opacity: .5; cursor: not-allowed; }
-.resolved { color: var(--muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resolved { color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; word-break: break-word; line-height: 1.4; }
 
 /* editor tabs */
 .editor-tabs {
