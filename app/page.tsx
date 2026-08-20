@@ -281,6 +281,82 @@ const serviceTemplates: ServiceTemplate[] = [
       { name: 'Create a post', method: 'POST', url: 'https://jsonplaceholder.typicode.com/posts', headers: jsonHeaders, body: '{\n  "title": "hello",\n  "body": "world",\n  "userId": 1\n}' },
     ],
   },
+  {
+    id: 'wikipedia',
+    category: 'Free & no-auth',
+    name: 'Wikipedia',
+    blurb: 'REST summary for any article, no key.',
+    variables: [{ key: 'title', value: 'Application_programming_interface' }],
+    requests: [{ name: 'Page summary', method: 'GET', url: 'https://en.wikipedia.org/api/rest_v1/page/summary/{{title}}' }],
+  },
+  {
+    id: 'frankfurter',
+    category: 'Free & no-auth',
+    name: 'Frankfurter (FX rates)',
+    blurb: 'Foreign-exchange rates from the ECB, no key.',
+    variables: [
+      { key: 'base', value: 'USD' },
+      { key: 'symbols', value: 'EUR,GBP,JPY' },
+    ],
+    requests: [{ name: 'Latest rates', method: 'GET', url: 'https://api.frankfurter.app/latest?from={{base}}&to={{symbols}}' }],
+  },
+  {
+    id: 'exchangerate-host',
+    category: 'Free & no-auth',
+    name: 'exchangerate.host',
+    blurb: 'Currency conversion, no key.',
+    variables: [
+      { key: 'from', value: 'USD' },
+      { key: 'to', value: 'EUR' },
+      { key: 'amount', value: '100' },
+    ],
+    requests: [{ name: 'Convert', method: 'GET', url: 'https://api.exchangerate.host/convert?from={{from}}&to={{to}}&amount={{amount}}' }],
+  },
+  {
+    id: 'usgs-quakes',
+    category: 'Free & no-auth',
+    name: 'USGS Earthquakes',
+    blurb: 'Recent significant earthquakes (GeoJSON), no key.',
+    variables: [],
+    requests: [
+      { name: 'Significant, past day', method: 'GET', url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_day.geojson' },
+    ],
+  },
+  {
+    id: 'nasa-apod',
+    category: 'Free & no-auth',
+    name: 'NASA (APOD)',
+    blurb: 'Astronomy Picture of the Day. Works with the shared DEMO_KEY.',
+    variables: [{ key: 'apiKey', value: 'DEMO_KEY' }],
+    requests: [{ name: 'Picture of the day', method: 'GET', url: 'https://api.nasa.gov/planetary/apod?api_key={{apiKey}}' }],
+  },
+  {
+    id: 'opentrivia',
+    category: 'Free & no-auth',
+    name: 'Open Trivia DB',
+    blurb: 'Trivia questions, no key.',
+    variables: [{ key: 'amount', value: '5' }],
+    requests: [{ name: 'Get questions', method: 'GET', url: 'https://opentdb.com/api.php?amount={{amount}}' }],
+  },
+  {
+    id: 'themealdb',
+    category: 'Free & no-auth',
+    name: 'TheMealDB',
+    blurb: 'Recipe lookup, no key (test key 1).',
+    variables: [{ key: 'query', value: 'Arrabiata' }],
+    requests: [{ name: 'Search meal', method: 'GET', url: 'https://www.themealdb.com/api/json/v1/1/search.php?s={{query}}' }],
+  },
+  {
+    id: 'sunrise-sunset',
+    category: 'Free & no-auth',
+    name: 'Sunrise-Sunset',
+    blurb: 'Sunrise/sunset times for a location, no key.',
+    variables: [
+      { key: 'lat', value: '36.7201600' },
+      { key: 'lon', value: '-4.4203400' },
+    ],
+    requests: [{ name: 'Times', method: 'GET', url: 'https://api.sunrise-sunset.org/json?lat={{lat}}&lng={{lon}}&formatted=0' }],
+  },
 ];
 
 const storageKey = 'post-bda-workspace-v2';
