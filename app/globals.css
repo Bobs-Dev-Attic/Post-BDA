@@ -574,6 +574,9 @@ pre {
   max-height: calc(100vh - 3rem);
   overflow: auto;
 }
+.tpl-group { display: grid; gap: .4rem; }
+.tpl-group + .tpl-group { margin-top: .3rem; }
+.tpl-cat { font-size: .68rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); font-weight: 700; }
 .tpl-grid { display: grid; gap: .5rem; }
 .tpl-item {
   text-align: left;
