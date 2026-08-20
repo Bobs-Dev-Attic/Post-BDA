@@ -111,14 +111,19 @@ const themes: Theme[] = [
 type ServiceTemplate = {
   id: string;
   name: string;
+  category: string;
   blurb: string;
   variables: { key: string; value: string; secret?: boolean }[];
   requests: { name: string; method: string; url: string; headers?: [string, string][]; body?: string; auth?: Partial<Auth> }[];
 };
+const templateCategoryOrder = ['Free & no-auth', 'Popular services'];
 const jsonHeaders: [string, string][] = [['Content-Type', 'application/json'], ['Accept', 'application/json']];
+// weather.gov and OpenStreetMap ask for a descriptive User-Agent identifying the caller.
+const geoHeaders: [string, string][] = [['User-Agent', '{{userAgent}}'], ['Accept', 'application/json']];
 const serviceTemplates: ServiceTemplate[] = [
   {
     id: 'httpbin',
+    category: 'Popular services',
     name: 'HTTPBin (testing)',
     blurb: 'A sandbox API for trying requests — no credentials needed.',
     variables: [],
@@ -129,6 +134,7 @@ const serviceTemplates: ServiceTemplate[] = [
   },
   {
     id: 'github',
+    category: 'Popular services',
     name: 'GitHub API',
     blurb: 'REST API v3. Create a personal access token and paste it into {{token}}.',
     variables: [{ key: 'token', value: '', secret: true }],
@@ -139,6 +145,7 @@ const serviceTemplates: ServiceTemplate[] = [
   },
   {
     id: 'openai',
+    category: 'Popular services',
     name: 'OpenAI API',
     blurb: 'Chat Completions. Paste your API key into {{apiKey}}.',
     variables: [{ key: 'apiKey', value: '', secret: true }],
@@ -155,6 +162,7 @@ const serviceTemplates: ServiceTemplate[] = [
   },
   {
     id: 'stripe',
+    category: 'Popular services',
     name: 'Stripe API',
     blurb: 'Paste a secret key into {{secretKey}} (used as Bearer auth).',
     variables: [{ key: 'secretKey', value: '', secret: true }],
@@ -164,6 +172,7 @@ const serviceTemplates: ServiceTemplate[] = [
   },
   {
     id: 'slack',
+    category: 'Popular services',
     name: 'Slack API',
     blurb: 'Post a message. Set {{token}} (bot token) and {{channel}}.',
     variables: [
@@ -179,6 +188,97 @@ const serviceTemplates: ServiceTemplate[] = [
         body: '{\n  "channel": "{{channel}}",\n  "text": "Hello from Post-BDA"\n}',
         auth: { type: 'bearer', token: '{{token}}' },
       },
+    ],
+  },
+  {
+    id: 'nws',
+    category: 'Free & no-auth',
+    name: 'US National Weather Service',
+    blurb: 'weather.gov — forecasts & alerts, no key. Set a descriptive {{userAgent}}.',
+    variables: [
+      { key: 'userAgent', value: 'post-bda-client (you@example.com)' },
+      { key: 'lat', value: '39.7456' },
+      { key: 'lon', value: '-97.0892' },
+      { key: 'state', value: 'NY' },
+    ],
+    requests: [
+      { name: 'Point metadata', method: 'GET', url: 'https://api.weather.gov/points/{{lat}},{{lon}}', headers: geoHeaders },
+      { name: 'Active alerts (by state)', method: 'GET', url: 'https://api.weather.gov/alerts/active?area={{state}}', headers: geoHeaders },
+    ],
+  },
+  {
+    id: 'open-meteo',
+    category: 'Free & no-auth',
+    name: 'Open-Meteo (weather)',
+    blurb: 'Current & forecast weather worldwide, no key required.',
+    variables: [
+      { key: 'lat', value: '40.7128' },
+      { key: 'lon', value: '-74.0060' },
+    ],
+    requests: [
+      {
+        name: 'Current weather',
+        method: 'GET',
+        url: 'https://api.open-meteo.com/v1/forecast?latitude={{lat}}&longitude={{lon}}&current=temperature_2m,wind_speed_10m',
+      },
+    ],
+  },
+  {
+    id: 'restcountries',
+    category: 'Free & no-auth',
+    name: 'REST Countries',
+    blurb: 'Country data by name, no key.',
+    variables: [{ key: 'country', value: 'canada' }],
+    requests: [{ name: 'Country by name', method: 'GET', url: 'https://restcountries.com/v3.1/name/{{country}}' }],
+  },
+  {
+    id: 'openlibrary',
+    category: 'Free & no-auth',
+    name: 'Open Library',
+    blurb: 'Book search from the Internet Archive, no key.',
+    variables: [{ key: 'query', value: 'the odyssey' }],
+    requests: [{ name: 'Search books', method: 'GET', url: 'https://openlibrary.org/search.json?q={{query}}' }],
+  },
+  {
+    id: 'nominatim',
+    category: 'Free & no-auth',
+    name: 'OpenStreetMap (geocoding)',
+    blurb: 'Nominatim forward geocoding, no key. Set a descriptive {{userAgent}}.',
+    variables: [
+      { key: 'userAgent', value: 'post-bda-client (you@example.com)' },
+      { key: 'query', value: 'Eiffel Tower' },
+    ],
+    requests: [
+      { name: 'Search place', method: 'GET', url: 'https://nominatim.openstreetmap.org/search?q={{query}}&format=json', headers: geoHeaders },
+    ],
+  },
+  {
+    id: 'coingecko',
+    category: 'Free & no-auth',
+    name: 'CoinGecko (crypto prices)',
+    blurb: 'Simple price lookups, no key.',
+    variables: [{ key: 'coin', value: 'bitcoin' }],
+    requests: [
+      { name: 'Simple price', method: 'GET', url: 'https://api.coingecko.com/api/v3/simple/price?ids={{coin}}&vs_currencies=usd' },
+    ],
+  },
+  {
+    id: 'pokeapi',
+    category: 'Free & no-auth',
+    name: 'PokeAPI',
+    blurb: 'Pokémon data, no key.',
+    variables: [{ key: 'name', value: 'pikachu' }],
+    requests: [{ name: 'Get Pokémon', method: 'GET', url: 'https://pokeapi.co/api/v2/pokemon/{{name}}' }],
+  },
+  {
+    id: 'jsonplaceholder',
+    category: 'Free & no-auth',
+    name: 'JSONPlaceholder',
+    blurb: 'Fake REST API for prototyping — GET and POST samples.',
+    variables: [],
+    requests: [
+      { name: 'Get a post', method: 'GET', url: 'https://jsonplaceholder.typicode.com/posts/1' },
+      { name: 'Create a post', method: 'POST', url: 'https://jsonplaceholder.typicode.com/posts', headers: jsonHeaders, body: '{\n  "title": "hello",\n  "body": "world",\n  "userId": 1\n}' },
     ],
   },
 ];
@@ -1300,18 +1400,26 @@ export default function Home() {
               Creates a collection with ready-made requests and placeholder variables. Fill in your own keys/tokens after
               — nothing here contains real credentials.
             </p>
-            <div className="tpl-grid">
-              {serviceTemplates.map((t) => (
-                <button key={t.id} className="tpl-item" onClick={() => applyTemplate(t)}>
-                  <span className="tpl-name">{t.name}</span>
-                  <span className="tpl-blurb">{t.blurb}</span>
-                  <span className="tpl-meta">
-                    {t.requests.length} request{t.requests.length === 1 ? '' : 's'}
-                    {t.variables.length > 0 && ` · ${t.variables.length} variable${t.variables.length === 1 ? '' : 's'}`}
-                  </span>
-                </button>
+            {templateCategoryOrder
+              .map((cat) => ({ cat, items: serviceTemplates.filter((t) => t.category === cat) }))
+              .filter((g) => g.items.length > 0)
+              .map((g) => (
+                <div className="tpl-group" key={g.cat}>
+                  <div className="tpl-cat">{g.cat}</div>
+                  <div className="tpl-grid">
+                    {g.items.map((t) => (
+                      <button key={t.id} className="tpl-item" onClick={() => applyTemplate(t)}>
+                        <span className="tpl-name">{t.name}</span>
+                        <span className="tpl-blurb">{t.blurb}</span>
+                        <span className="tpl-meta">
+                          {t.requests.length} request{t.requests.length === 1 ? '' : 's'}
+                          {t.variables.length > 0 && ` · ${t.variables.length} variable${t.variables.length === 1 ? '' : 's'}`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </div>
           </div>
         </div>
       )}
