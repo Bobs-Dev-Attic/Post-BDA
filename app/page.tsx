@@ -688,6 +688,46 @@ export default function Home() {
     if (active) updateRequest(active.id, patch);
   }
 
+  // When the URL contains a query string, move those pairs into the Params table
+  // (creating/updating rows) and strip them from the URL. The send-time builder
+  // reassembles the query from params, so nothing is lost.
+  function absorbUrlQuery() {
+    if (!active) return;
+    const raw = active.url;
+    const q = raw.indexOf('?');
+    if (q < 0) return;
+    const hashIdx = raw.indexOf('#', q);
+    const base = raw.slice(0, q);
+    const queryStr = hashIdx >= 0 ? raw.slice(q + 1, hashIdx) : raw.slice(q + 1);
+    const hash = hashIdx >= 0 ? raw.slice(hashIdx) : '';
+    const dec = (s: string) => {
+      try {
+        return decodeURIComponent(s.replace(/\+/g, ' '));
+      } catch {
+        return s;
+      }
+    };
+    const parsed = queryStr
+      .split('&')
+      .filter(Boolean)
+      .map((p) => {
+        const eq = p.indexOf('=');
+        return eq >= 0 ? { key: dec(p.slice(0, eq)), value: dec(p.slice(eq + 1)) } : { key: dec(p), value: '' };
+      })
+      .filter((p) => p.key);
+    if (!parsed.length) {
+      if (base !== raw) updateActive({ url: base + hash });
+      return;
+    }
+    const merged = active.params.slice();
+    for (const { key, value } of parsed) {
+      const idx = merged.findIndex((r) => r.enabled && r.key === key);
+      if (idx >= 0) merged[idx] = { ...merged[idx], value };
+      else merged.push({ id: uid(), key, value, enabled: true });
+    }
+    updateActive({ url: base + hash, params: merged });
+  }
+
   function updateAuth(patch: Partial<Auth>) {
     if (active) updateActive({ auth: { ...active.auth, ...patch } });
   }
@@ -2153,6 +2193,7 @@ export default function Home() {
                 <input
                   value={active.url}
                   onChange={(e) => updateActive({ url: e.target.value })}
+                  onBlur={absorbUrlQuery}
                   placeholder="https://api.example.com/{{version}}/users"
                   type="url"
                   inputMode="url"
